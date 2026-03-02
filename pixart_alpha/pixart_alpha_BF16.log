@@ -1,0 +1,8 @@
+/usr/local/lib/python3.12/dist-packages/modelopt/torch/utils/logging.py:115: UserWarning: Failed to import modelopt transformer engine plugin due to: AttributeError("module 'transformer_engine' has no attribute 'pytorch'"). You may ignore this warning if you do not need this plugin.
+  warnings.warn(message, *args, **kwargs)
+/usr/local/lib/python3.12/dist-packages/modelopt/torch/utils/logging.py:115: UserWarning: Failed to import modelopt transformer_engine plugin due to: ImportError('/usr/local/lib/python3.12/dist-packages/transformer_engine/transformer_engine_torch.cpython-312-x86_64-linux-gnu.so: undefined symbol: _ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_ib'). You may ignore this warning if you do not need this plugin.
+  warnings.warn(message, *args, **kwargs)
+/usr/local/lib/python3.12/dist-packages/modelopt/torch/__init__.py:36: UserWarning: transformers version 5.2.0 is not tested with nvidia-modelopt and may cause issues. Please install recommended version with `pip install nvidia-modelopt[hf]` if working with HF models.
+  _warnings.warn(
+🚀 Loading Teacher Model (FP32) for Similarity Reference...
+Fetching 14 files:   0%|          | 0/14 [00:00<?, ?it/s]Fetching 14 files:  14%|█▍        | 2/14 [00:00<00:01,  7.03it/s]Fetching 14 files:  29%|██▊       | 4/14 [05:25<15:57, 95.71s/it]
