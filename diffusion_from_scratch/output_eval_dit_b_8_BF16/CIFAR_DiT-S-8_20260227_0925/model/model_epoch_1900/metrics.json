@@ -1,0 +1,13 @@
+{
+    "model_path": "/data/jameskimh/DiT/CIFAR_DiT-S-8_20260227_0925/model/model_epoch_1900.pt",
+    "model_size": "DiT-S/8",
+    "num_samples": 1000,
+    "quant_method": "BF16",
+    "metrics": {
+        "FID": 77.5759,
+        "IS_mean": 6.2448,
+        "IS_std": 0.6788,
+        "KID_mean": 0.0249,
+        "KID_std": 0.0058
+    }
+}

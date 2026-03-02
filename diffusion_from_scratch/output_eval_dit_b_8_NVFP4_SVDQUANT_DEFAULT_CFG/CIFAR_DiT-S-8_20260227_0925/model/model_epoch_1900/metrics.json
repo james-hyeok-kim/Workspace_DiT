@@ -1,0 +1,13 @@
+{
+    "model_path": "/data/jameskimh/DiT/results/CIFAR_DiT-S-8_20260227_0925/model/model_epoch_1900.pt",
+    "model_size": "DiT-S/8",
+    "num_samples": 1000,
+    "quant_method": "NVFP4_SVDQUANT_DEFAULT_CFG",
+    "metrics": {
+        "FID": 146.616,
+        "IS_mean": 4.1228,
+        "IS_std": 0.2331,
+        "KID_mean": 0.1059,
+        "KID_std": 0.0122
+    }
+}

@@ -1,0 +1,4 @@
+cp -rf run_dit_s_8_sample_eval_bf16.sh run_dit_l_8_sample_eval_bf16.sh;
+cp -rf run_dit_s_8_sample_eval_fp32.sh run_dit_l_8_sample_eval_fp32.sh;
+cp -rf run_dit_s_8_sample_eval_nvfp4_default.sh run_dit_l_8_sample_eval_nvfp4_default.sh;
+cp -rf run_dit_s_8_sample_eval_nvfp4_svd_default.sh run_dit_l_8_sample_eval_nvfp4_svd_default.sh;
