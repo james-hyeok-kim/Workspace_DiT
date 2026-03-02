@@ -8,7 +8,6 @@ OUTPUT_DIR="${BASE_DIR}"/results/
 mkdir -p ${OUTPUT_DIR}
 
 export PYTHONUNBUFFERED=1
-export HF_TOKEN="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"
 
 # 2. 평가 스크립트 실행
 CUDA_VISIBLE_DEVICES=0 python pixart_alpha_quant.py \
