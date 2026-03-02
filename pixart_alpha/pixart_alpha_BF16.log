@@ -5,4 +5,64 @@
 /usr/local/lib/python3.12/dist-packages/modelopt/torch/__init__.py:36: UserWarning: transformers version 5.2.0 is not tested with nvidia-modelopt and may cause issues. Please install recommended version with `pip install nvidia-modelopt[hf]` if working with HF models.
   _warnings.warn(
 🚀 Loading Teacher Model (FP32) for Similarity Reference...
-Fetching 14 files:   0%|          | 0/14 [00:00<?, ?it/s]Fetching 14 files:  14%|█▍        | 2/14 [00:00<00:01,  7.03it/s]Fetching 14 files:  29%|██▊       | 4/14 [05:25<15:57, 95.71s/it]
+Fetching 14 files:   0%|          | 0/14 [00:00<?, ?it/s]Fetching 14 files:  14%|█▍        | 2/14 [00:00<00:01,  7.03it/s]Fetching 14 files:  29%|██▊       | 4/14 [05:25<15:57, 95.71s/it]Fetching 14 files:  36%|███▌      | 5/14 [06:08<12:02, 80.23s/it]Fetching 14 files:  86%|████████▌ | 12/14 [06:21<00:43, 21.57s/it]Fetching 14 files: 100%|██████████| 14/14 [06:21<00:00, 27.22s/it]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Could not extract SentencePiece model from /home/jameskimh/.cache/huggingface/hub/models--PixArt-alpha--PixArt-XL-2-1024-MS/snapshots/b89adadeccd9ead2adcb9fa2825d3fabec48d404/tokenizer/spiece.model using sentencepiece library due to 
+SentencePieceExtractor requires the SentencePiece library but it was not found in your environment. Check out the instructions on the
+installation page of its repo: https://github.com/google/sentencepiece#installation and follow the ones
+that match your environment. Please note that you may need to restart your runtime after installation.
+. Falling back to TikToken extractor.
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/transformers/tokenization_utils_tokenizers.py", line 165, in convert_to_native_format
+    local_kwargs = SentencePieceExtractor(vocab_file).extract(cls.model, **local_kwargs)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/convert_slow_tokenizer.py", line 152, in __init__
+    requires_backends(self, "sentencepiece")
+  File "/usr/local/lib/python3.12/dist-packages/transformers/utils/import_utils.py", line 1878, in requires_backends
+    raise ImportError("".join(failed))
+ImportError: 
+SentencePieceExtractor requires the SentencePiece library but it was not found in your environment. Check out the instructions on the
+installation page of its repo: https://github.com/google/sentencepiece#installation and follow the ones
+that match your environment. Please note that you may need to restart your runtime after installation.
+
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/tiktoken/load.py", line 168, in load_tiktoken_bpe
+    token, rank = line.split()
+    ^^^^^^^^^^^
+ValueError: not enough values to unpack (expected 2, got 1)
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/app/workspace/DiT/Workspace_DiT/pixart_alpha/pixart_alpha_quant.py", line 112, in <module>
+    main()
+  File "/app/workspace/DiT/Workspace_DiT/pixart_alpha/pixart_alpha_quant.py", line 35, in main
+    teacher_pipe = PixArtAlphaPipeline.from_pretrained(args.model_id, torch_dtype=torch.float32).to(device)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/huggingface_hub/utils/_validators.py", line 89, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/diffusers/pipelines/pipeline_utils.py", line 1021, in from_pretrained
+    loaded_sub_model = load_sub_model(
+                       ^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/diffusers/pipelines/pipeline_loading_utils.py", line 876, in load_sub_model
+    loaded_sub_model = load_method(os.path.join(cached_folder, name), **loading_kwargs)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/tokenization_utils_base.py", line 1712, in from_pretrained
+    return cls._from_pretrained(
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/tokenization_utils_base.py", line 1897, in _from_pretrained
+    init_kwargs = cls.convert_to_native_format(**init_kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/tokenization_utils_tokenizers.py", line 188, in convert_to_native_format
+    ).extract_vocab_merges_from_model(vocab_file)
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/transformers/convert_slow_tokenizer.py", line 1855, in extract_vocab_merges_from_model
+    bpe_ranks = load_tiktoken_bpe(tiktoken_url)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/tiktoken/load.py", line 171, in load_tiktoken_bpe
+    raise ValueError(f"Error parsing line {line!r} in {tiktoken_bpe_file}") from e
+ValueError: Error parsing line b'\x0e' in /home/jameskimh/.cache/huggingface/hub/models--PixArt-alpha--PixArt-XL-2-1024-MS/snapshots/b89adadeccd9ead2adcb9fa2825d3fabec48d404/tokenizer/spiece.model
