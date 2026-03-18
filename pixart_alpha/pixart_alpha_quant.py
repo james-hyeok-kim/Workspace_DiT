@@ -2,10 +2,16 @@ import os
 # ✅ [핵심 1] 메모리 단편화 방지
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
+# ✅ [핵심 1] 메모리 단편화 방지
+os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
+import gc
 import gc
 import argparse
 import numpy as np
+import random
+import json
 import random
 import json
 from tqdm import tqdm
@@ -26,6 +32,9 @@ except ImportError:
 
 from torchmetrics.image.fid import FrechetInceptionDistance
 from torchmetrics.image import StructuralSimilarityIndexMeasure as SSIM
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPS
+from torchmetrics.image import PeakSignalNoiseRatio as PSNR
+from transformers import CLIPModel, CLIPProcessor
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity as LPIPS
 from torchmetrics.image import PeakSignalNoiseRatio as PSNR
 from transformers import CLIPModel, CLIPProcessor
@@ -282,9 +291,9 @@ def print_available_quant_methods():
     print("="*80)
 
 def main():
-    args = parse_args()
-    os.makedirs(args.save_dir, exist_ok=True)
-    device = torch.device(args.device)
+    args = parse_args()
+    os.makedirs(args.save_dir, exist_ok=True)
+    device = torch.device(args.device)
 
     # 시드 고정
     random.seed(args.seed)
