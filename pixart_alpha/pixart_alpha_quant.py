@@ -316,7 +316,7 @@ def main():
     prompts, teacher_imgs_cpu = [], []
 
     for i, data in enumerate(ds):
-        if i >= max(args.num_samples, 64): break
+        if i >= args.num_samples: break
         prompt = data[caption_key]
         prompts.append(prompt)
         if i < args.num_samples:
