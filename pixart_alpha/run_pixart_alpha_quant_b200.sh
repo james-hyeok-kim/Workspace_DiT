@@ -3,7 +3,7 @@
 # 1. GPU 및 환경 설정
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTHONUNBUFFERED=1
-export HF_TOKEN=""
+export HF_TOKEN="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"
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
 # 2. 경로 설정
@@ -35,8 +35,10 @@ BLOCK_SIZE=16
 NUMERIC="half"
 
 # 🎯 5. 양자화 모드 조합 배열 정의 (원하는 조합만 남기고 지워도 됩니다)
-ACT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
-WGT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+#ACT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+#WGT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+ACT_MODES=("INT8")
+WGT_MODES=("INT8")
 
 mkdir -p "${BASE_DIR}/logs"
 
