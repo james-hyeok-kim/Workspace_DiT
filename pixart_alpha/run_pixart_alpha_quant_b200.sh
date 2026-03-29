@@ -3,7 +3,10 @@
 # 1. GPU 및 환경 설정
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTHONUNBUFFERED=1
-export HF_TOKEN=""
+# HF_TOKEN
+if [ -f ~/.env ]; then
+  export $(grep -v '^#' ~/.env | xargs)
+fi
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
 # 2. 경로 설정
