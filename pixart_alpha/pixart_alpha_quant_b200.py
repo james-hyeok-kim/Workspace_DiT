@@ -184,7 +184,7 @@ class ManualSVDLinear(torch.nn.Module):
         if self.act_mode == "NVFP4":
             x_q = quantize_to_nvfp4(x_smoothed, self.block_size)
         else:
-            x_q = quantize_uniform(w_smoothed, self.block_size, mode=self.act_mode)
+            x_q = quantize_uniform(x_smoothed, self.block_size, mode=self.act_mode)
             
         # 3. Base 브랜치 연산: Y_base = X_q * W_q^T
         base_out = F.linear(x_q, self.w_quantized)
