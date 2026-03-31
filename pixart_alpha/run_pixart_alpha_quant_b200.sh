@@ -15,6 +15,7 @@ REF_DIR="/data/james_dit_ref/ref_images_fp16"
 
 # 3. 테스트 모드 스위치 (1: 테스트, 0: 본 실험)
 TEST_MODE=1
+QUANT_METHOD="RPCA"
 
 # 4. 모드별 파라미터 자동 분기
 if [ "$TEST_MODE" -eq 1 ]; then
@@ -79,6 +80,7 @@ for act in "${ACT_MODES[@]}"; do
             --block_size ${BLOCK_SIZE} \
             --numeric_dtype "${NUMERIC}" \
             --dataset_name "${DATA_SET}" \
+            --quant_method "${QUANT_METHOD}" \
             ${FLAGS} \
             2>&1 | tee "${LOG_FILE}"
 

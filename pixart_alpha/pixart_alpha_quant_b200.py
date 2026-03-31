@@ -202,6 +202,120 @@ class ManualSVDLinear(torch.nn.Module):
         return out.to(input_dtype)
 
 
+class ManualRPCALinear(torch.nn.Module):
+    def __init__(self, original_linear, act_mode, wgt_mode, alpha=0.5, rank=32, block_size=16, outlier_ratio=0.01, dtype=torch.float32):
+        super().__init__()
+        self.target_dtype = dtype
+        self.act_mode = act_mode
+        self.wgt_mode = wgt_mode
+        self.alpha = alpha
+        self.rank = rank
+        self.block_size = block_size
+        self.outlier_ratio = outlier_ratio # 🎯 [추가] 튀는 값을 얼마만큼 빼낼 것인지 (예: 1%)
+        
+        # 원본 파라미터 백업
+        self.register_buffer('weight', original_linear.weight.data.clone().to(dtype))
+        self.bias = nn.Parameter(original_linear.bias.data.clone().to(dtype)) if original_linear.bias is not None else None
+        
+        # RPCA 분리를 위한 버퍼 (S 행렬)
+        self.register_buffer('w_sparse', torch.zeros_like(original_linear.weight.data).to(dtype))
+        
+        # 양자화 및 L 행렬(Dense) 처리를 위한 버퍼/파라미터
+        self.register_buffer('w_quantized', original_linear.weight.data.clone().to(dtype))
+        self.register_buffer('smooth_scale', torch.ones(self.weight.shape[1]).to(dtype))
+        
+        # Low Rank 브랜치 (L 행렬의 양자화 오차 보정용)
+        self.lora_a = nn.Parameter(torch.zeros(rank, self.weight.shape[1]).to(dtype))
+        self.lora_b = nn.Parameter(torch.zeros(self.weight.shape[0], rank).to(dtype))
+        
+        self.is_calibrated = False
+
+    @torch.no_grad()
+    def manual_calibrate_and_rpca(self, x_max):
+        x_max = x_max.clamp(min=1e-5).float()
+        
+        # 🎯 1. RPCA 핵심: Sparse(S)와 Dense(L) 행렬 분리
+        w_abs = self.weight.abs()
+        # 전체 가중치 중 상위 outlier_ratio% 에 해당하는 기준값(threshold) 계산
+        threshold = torch.quantile(w_abs.view(-1).float(), 1.0 - self.outlier_ratio)
+        
+        # Outlier 마스크 생성
+        sparse_mask = w_abs >= threshold
+        
+        # S 행렬 (Sparse): Outlier만 남기고 나머지는 0. 이 값들은 양자화하지 않고 고정밀도 유지.
+        self.w_sparse.copy_((self.weight * sparse_mask).to(self.target_dtype))
+        
+        # L 행렬 (Dense): Outlier가 제거되어 값의 분포가 매우 안정적인 상태.
+        w_dense = self.weight * (~sparse_mask)
+
+        # 🎯 2. Smooth Scale 계산 (주의: 거친 Outlier가 빠진 w_dense 기준으로 계산!)
+        # 이렇게 하면 scale 값이 튀지 않아 초저정밀도 양자화에 훨씬 유리해집니다.
+        w_max = w_dense.abs().max(dim=0)[0].clamp(min=1e-5).float()
+        self.smooth_scale.data = (w_max.pow(1 - self.alpha) / x_max.pow(self.alpha)).to(self.target_dtype)
+        self.smooth_scale.data = self.smooth_scale.data.clamp(min=1e-4, max=1e4)
+        
+        # 3. L 행렬 Smoothing 적용
+        w_smoothed = w_dense.float() / self.smooth_scale.float().view(1, -1)
+        
+        # 4. Smoothing된 L 행렬을 양자화
+        if self.wgt_mode == "NVFP4":
+            w_q = quantize_to_nvfp4(w_smoothed, self.block_size)
+        else:
+            w_q = quantize_uniform(w_smoothed, self.block_size, mode=self.wgt_mode)
+        
+        self.w_quantized.copy_(w_q.to(self.target_dtype))
+        
+        # 5. SVD 분해를 위한 L 행렬의 양자화 Error 계산
+        w_error = w_smoothed - w_q 
+        
+        # 6. Error에 대한 SVD 분해 (기존과 동일)
+        U, S, Vh = torch.linalg.svd(w_error.float(), full_matrices=False)
+        actual_rank = min(self.rank, S.shape[0])
+        sqrt_S = torch.sqrt(S[:actual_rank])
+
+        V_scaled = Vh[:actual_rank, :] * sqrt_S.unsqueeze(1)
+        lora_a_data = torch.zeros(self.rank, self.weight.shape[1], dtype=self.target_dtype, device=x_max.device)
+        lora_a_data[:actual_rank, :] = V_scaled.to(self.target_dtype)
+        self.lora_a.data = lora_a_data
+
+        U_scaled = U[:, :actual_rank] * sqrt_S.unsqueeze(0)
+        lora_b_data = torch.zeros(self.weight.shape[0], self.rank, dtype=self.target_dtype, device=x_max.device)
+        lora_b_data[:, :actual_rank] = U_scaled.to(self.target_dtype)
+        self.lora_b.data = lora_b_data
+        
+        self.is_calibrated = True
+
+    def forward(self, x):
+        input_dtype = x.dtype
+        if not self.is_calibrated: 
+            return F.linear(x, self.weight.to(input_dtype), self.bias.to(input_dtype) if self.bias is not None else None)
+        
+        # 1. Activation Smoothing
+        x_smoothed = x.to(self.target_dtype) * self.smooth_scale
+        
+        # 2. Activation 양자화
+        if self.act_mode == "NVFP4":
+            x_q = quantize_to_nvfp4(x_smoothed, self.block_size)
+        else:
+            x_q = quantize_uniform(x_smoothed, self.block_size, mode=self.act_mode)
+            
+        # 3. Base 브랜치 (L 행렬의 양자화 파트): Y_base = X_q * W_q^T
+        base_out = F.linear(x_q, self.w_quantized)
+        
+        # 4. SVD 브랜치 (L 행렬의 오차 보정 파트): 원본 입력이 아닌 smoothed된 입력 사용
+        svd_out = F.linear(F.linear(x_smoothed, self.lora_a), self.lora_b)
+        
+        # 🎯 5. Sparse 브랜치 (S 행렬 - Outlier 파트)
+        # S 행렬은 smoothing의 영향을 받지 않았으므로 순수한 원본 입력 x를 곱해줍니다.
+        sparse_out = F.linear(x.to(self.target_dtype), self.w_sparse)
+        
+        # 6. 최종 합산
+        out = base_out + svd_out + sparse_out
+        if self.bias is not None:
+            out += self.bias
+            
+        return out.to(input_dtype)
+
 # ==========================================
 # 2. 메인 실행 로직 (Multi-GPU Sync 강화)
 # ==========================================
@@ -230,6 +344,7 @@ def main():
     parser.add_argument("--numeric_dtype", type=str, default="half")
     parser.add_argument("--block_size", type=int, default=16)
     parser.add_argument("--dataset_name", type=str, default="MJHQ", choices=["MJHQ", "sDCI"])
+    parser.add_argument("--quant_method", type=str, default="SVD", choices=["SVD", "RPCA"])
     args = parser.parse_args()
 
 # 🎯 [Step 0] 카운트 및 프롬프트 설정
@@ -343,10 +458,36 @@ def main():
         
         curr_dev = next(orig_m.parameters()).device
         if curr_dev == device:
-            new_l = ManualSVDLinear(orig_m, args.act_mode, args.wgt_mode, args.alpha, args.lowrank, args.block_size, 
-                                     torch.float16 if args.numeric_dtype == "half" else torch.float32).to(device)
-            if name in all_samples:
-                new_l.manual_calibrate_and_svd(all_samples[name])
+            # 1. 공통으로 사용할 Target Data Type 미리 정의
+            target_dtype = torch.float16 if args.numeric_dtype == "half" else torch.float32
+            
+            if args.quant_method == "SVD":
+                new_l = ManualSVDLinear(
+                    orig_m, args.act_mode, args.wgt_mode, args.alpha, 
+                    args.lowrank, args.block_size, target_dtype
+                ).to(device)
+                
+                if name in all_samples:
+                    # SVD 캘리브레이션 호출
+                    new_l.manual_calibrate_and_svd(all_samples[name])
+                    
+            elif args.quant_method == "RPCA":
+                # 🎯 args에 outlier_ratio가 세팅되어 있지 않다면 기본값(예: 0.01)을 사용하도록 안전장치 추가
+                outlier_ratio = getattr(args, 'outlier_ratio', 0.01) 
+                
+                new_l = ManualRPCALinear(
+                    orig_m, args.act_mode, args.wgt_mode, args.alpha, 
+                    args.lowrank, args.block_size, outlier_ratio, target_dtype
+                ).to(device)
+                
+                if name in all_samples:
+                    # 🎯 RPCA 전용 캘리브레이션 함수 호출
+                    new_l.manual_calibrate_and_rpca(all_samples[name])
+            
+            else:
+                raise ValueError(f"지원하지 않는 양자화 방식입니다: {args.quant_method}")
+            
+            # 2. 완성된 새로운 레이어로 원본 트랜스포머의 레이어 교체
             set_module_by_name(transformer, name, new_l)
 
     # 교체 완료 후 다시 동기화
