@@ -25,13 +25,13 @@ NUMERIC="half"
 TEST_MODE=0
 
 # RPCA sweep 설정
-OUTLIER_RATIOS=(0.01 0.05 0.1)
+OUTLIER_RATIOS=(0 0.01 0.05 0.1)
 # (act_mode wgt_mode) 쌍
 BIT_COMBOS=("NVFP4 NVFP4" "INT8 INT8" "INT8 INT4" "INT4 INT4")
 
 # ---- 경로 설정 ----
 BASE_DIR="$(pwd)"
-REF_DIR="${BASE_DIR}/ref_images"
+REF_DIR="/data/james_dit_ref/ref_images_fp16"
 RESULT_BASE="${BASE_DIR}/results/rpca_sweep"
 LOG_DIR="${BASE_DIR}/logs/rpca_sweep"
 mkdir -p "${RESULT_BASE}" "${LOG_DIR}"
@@ -70,18 +70,21 @@ echo "---- [1/${TOTAL}] BASELINE: NVFP4_DEFAULT_CFG  ($(date '+%H:%M:%S')) ----"
 BASELINE_SAVE="${RESULT_BASE}/BASELINE"
 BASELINE_LOG="${LOG_DIR}/baseline_${MODE_LABEL}.log"
 
-${ACCEL_CMD} "${BASE_DIR}/pixart_rpca_experiment.py" \
-    --quant_method BASELINE \
-    --model_path "${MODEL_PATH}" \
-    --dataset_name "${DATASET}" \
-    --ref_dir "${REF_DIR}" \
-    --save_dir "${BASELINE_SAVE}" \
-    --num_samples ${NUM_SAMPLES} \
-    --lowrank ${LOWRANK} \
-    ${EXTRA_FLAGS} \
-    2>&1 | tee "${BASELINE_LOG}"
-
-echo "  [$(date '+%H:%M:%S')] Baseline done."
+if [ -f "${BASELINE_SAVE}/${DATASET}/metrics.json" ]; then
+    echo "  [SKIP] metrics.json already exists: ${BASELINE_SAVE}/${DATASET}/metrics.json"
+else
+    ${ACCEL_CMD} "${BASE_DIR}/pixart_rpca_experiment.py" \
+        --quant_method BASELINE \
+        --model_path "${MODEL_PATH}" \
+        --dataset_name "${DATASET}" \
+        --ref_dir "${REF_DIR}" \
+        --save_dir "${BASELINE_SAVE}" \
+        --num_samples ${NUM_SAMPLES} \
+        --lowrank ${LOWRANK} \
+        ${EXTRA_FLAGS} \
+        2>&1 | tee "${BASELINE_LOG}"
+    echo "  [$(date '+%H:%M:%S')] Baseline done."
+fi
 
 # ============================================================
 # Phase 2: RPCA Sweep (outlier_ratio x bit-combo)
@@ -100,24 +103,27 @@ for OR in "${OUTLIER_RATIOS[@]}"; do
         echo ""
         echo "---- [${RUN_IDX}/${TOTAL}] ${RUN_NAME}  ($(date '+%H:%M:%S')) ----"
 
-        ${ACCEL_CMD} "${BASE_DIR}/pixart_rpca_experiment.py" \
-            --quant_method RPCA \
-            --act_mode "${ACT}" \
-            --wgt_mode "${WGT}" \
-            --outlier_ratio "${OR}" \
-            --alpha "${ALPHA}" \
-            --lowrank ${LOWRANK} \
-            --block_size ${BLOCK_SIZE} \
-            --numeric_dtype "${NUMERIC}" \
-            --model_path "${MODEL_PATH}" \
-            --dataset_name "${DATASET}" \
-            --ref_dir "${REF_DIR}" \
-            --save_dir "${SAVE_DIR}" \
-            --num_samples ${NUM_SAMPLES} \
-            ${EXTRA_FLAGS} \
-            2>&1 | tee "${LOG_FILE}"
-
-        echo "  [$(date '+%H:%M:%S')] ${RUN_NAME} done."
+        if [ -f "${SAVE_DIR}/${DATASET}/metrics.json" ]; then
+            echo "  [SKIP] metrics.json already exists: ${SAVE_DIR}/${DATASET}/metrics.json"
+        else
+            ${ACCEL_CMD} "${BASE_DIR}/pixart_rpca_experiment.py" \
+                --quant_method RPCA \
+                --act_mode "${ACT}" \
+                --wgt_mode "${WGT}" \
+                --outlier_ratio "${OR}" \
+                --alpha "${ALPHA}" \
+                --lowrank ${LOWRANK} \
+                --block_size ${BLOCK_SIZE} \
+                --numeric_dtype "${NUMERIC}" \
+                --model_path "${MODEL_PATH}" \
+                --dataset_name "${DATASET}" \
+                --ref_dir "${REF_DIR}" \
+                --save_dir "${SAVE_DIR}" \
+                --num_samples ${NUM_SAMPLES} \
+                ${EXTRA_FLAGS} \
+                2>&1 | tee "${LOG_FILE}"
+            echo "  [$(date '+%H:%M:%S')] ${RUN_NAME} done."
+        fi
         RUN_IDX=$(( RUN_IDX + 1 ))
     done
 done
@@ -150,22 +156,7 @@ for path in sorted(glob.glob(os.path.join(result_base, "*", dataset, "metrics.js
         d = json.load(f)
     entries.append({"run": run_name, **d})
 
-# ---- results_summary.json ----
-summary = {
-    "sweep_start": sweep_start,
-    "sweep_end": sweep_end,
-    "mode": mode_label,
-    "num_samples": num_samples,
-    "dataset": dataset,
-    "runs": entries,
-}
-summary_path = os.path.join(result_base, "results_summary.json")
-with open(summary_path, "w") as f:
-    json.dump(summary, f, indent=4)
-print(f"  results_summary.json -> {summary_path}")
-
-# ---- handoff.md ----
-# FID 기준 오름차순 정렬 (낮을수록 좋음)
+# ---- FID 기준 정렬 및 rows 생성 (summary + handoff 공통 사용) ----
 sorted_entries = sorted(entries, key=lambda x: x.get("primary_metrics", {}).get("FID", 9999))
 baseline = next((e for e in entries if e["run"] == "BASELINE"), None)
 baseline_fid = baseline["primary_metrics"]["FID"] if baseline else None
@@ -204,6 +195,21 @@ for r in rows:
         f"| {r['run']} | {r['act']} | {r['wgt']} | {r['or']} "
         f"| {r['fid']} | {r['is']} | {r['psnr']} | {r['ssim']} | {r['lpips']} | {r['clip']} | {r['beat']} |"
     )
+
+# ---- results_summary.json (summary_table을 맨 위에 배치) ----
+summary = {
+    "summary_table": rows,
+    "sweep_start": sweep_start,
+    "sweep_end": sweep_end,
+    "mode": mode_label,
+    "num_samples": num_samples,
+    "dataset": dataset,
+    "runs": entries,
+}
+summary_path = os.path.join(result_base, "results_summary.json")
+with open(summary_path, "w") as f:
+    json.dump(summary, f, indent=4)
+print(f"  results_summary.json -> {summary_path}")
 
 # 베이스라인 대비 FID 개선된 조합
 winners = [r for r in rows if r["beat"] == "YES"]

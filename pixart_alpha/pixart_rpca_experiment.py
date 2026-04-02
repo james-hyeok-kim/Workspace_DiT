@@ -54,7 +54,13 @@ def get_prompts(num_samples, args):
 
 def quantize_uniform(x, block_size=16, mode="INT4"):
     orig_shape = x.shape
-    x_flat = x.view(-1, block_size)
+    num_el = x.numel()
+    # 원소 수가 block_size의 배수가 아닌 경우 패딩 후 처리
+    pad = (block_size - num_el % block_size) % block_size
+    flat = x.flatten()
+    if pad > 0:
+        flat = torch.cat([flat, torch.zeros(pad, device=x.device, dtype=x.dtype)])
+    x_flat = flat.view(-1, block_size)
     if mode == "TERNARY":
         q_max = 1.0
     elif mode.startswith("INT"):
@@ -65,12 +71,17 @@ def quantize_uniform(x, block_size=16, mode="INT4"):
     amax = x_flat.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
     scale = amax / q_max
     x_q_flat = torch.clamp(torch.round(x_flat / scale), -q_max, q_max)
-    return (x_q_flat * scale).view(orig_shape)
+    return (x_q_flat * scale).view(-1)[:num_el].view(orig_shape)
 
 
 def quantize_to_nvfp4(x, block_size=16):
     orig_shape = x.shape
-    x_flat = x.view(-1, block_size)
+    num_el = x.numel()
+    pad = (block_size - num_el % block_size) % block_size
+    flat = x.flatten()
+    if pad > 0:
+        flat = torch.cat([flat, torch.zeros(pad, device=x.device, dtype=x.dtype)])
+    x_flat = flat.view(-1, block_size)
     nvfp4_levels = torch.tensor(
         [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0], device=x.device, dtype=x.dtype
     )
@@ -80,7 +91,7 @@ def quantize_to_nvfp4(x, block_size=16):
     distances = torch.abs(x_norm.unsqueeze(-1) - nvfp4_levels)
     closest_idx = torch.argmin(distances, dim=-1)
     x_q = torch.sign(x_flat) * nvfp4_levels[closest_idx] * scale
-    return x_q.view(orig_shape)
+    return x_q.view(-1)[:num_el].view(orig_shape)
 
 
 def get_module_by_name(model, name):
