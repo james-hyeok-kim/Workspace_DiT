@@ -1,0 +1,21 @@
+{
+    "config": {
+        "quant_method": "FP16",
+        "lowrank": "N/A",
+        "block_size": "N/A",
+        "alpha": "N/A",
+        "baseline_lowrank": "N/A",
+        "num_samples": 20,
+        "dataset": "MJHQ"
+    },
+    "primary_metrics": {
+        "FID": -0.00019866884395014495,
+        "IS": 1.7068032026290894
+    },
+    "secondary_metrics": {
+        "PSNR": Infinity,
+        "SSIM": 0.9999869465827942,
+        "LPIPS": 0.0,
+        "CLIP": 35.52465057373047
+    }
+}
