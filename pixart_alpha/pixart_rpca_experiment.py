@@ -1,4 +1,5 @@
 import os
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -94,6 +95,33 @@ def quantize_to_nvfp4(x, block_size=16):
     return x_q.view(-1)[:num_el].view(orig_shape)
 
 
+def rpca_ialm(W, lam=None, max_iter=20, tol=1e-5):
+    """W = L + S via Inexact ALM (Candes et al. 2009)."""
+    m, n = W.shape
+    if lam is None:
+        lam = 1.0 / math.sqrt(max(m, n))
+    L = torch.zeros_like(W)
+    S = torch.zeros_like(W)
+    Y = W.clone()
+    norm_fro = W.norm(p='fro').clamp(min=1e-10)
+    mu = float(m * n) / (4.0 * float(W.abs().sum().clamp(min=1e-10)))
+    mu_bar = mu * 1e7
+    rho = 1.5
+    for _ in range(max_iter):
+        T = W - S + Y / mu
+        U, sv, Vh = torch.linalg.svd(T, full_matrices=False)
+        sv_t = torch.clamp(sv - 1.0 / mu, min=0)
+        L = (U * sv_t.unsqueeze(0)) @ Vh
+        R = W - L + Y / mu
+        S = torch.sign(R) * torch.clamp(R.abs() - lam / mu, min=0)
+        residual = W - L - S
+        Y = Y + mu * residual
+        mu = min(mu * rho, mu_bar)
+        if residual.norm(p='fro') / norm_fro < tol:
+            break
+    return L, S
+
+
 def get_module_by_name(model, name):
     for part in name.split("."):
         model = getattr(model, part)
@@ -163,9 +191,18 @@ class ManualSVDLinear(nn.Module):
 
 
 class ManualRPCALinear(nn.Module):
-    """RPCA 분해: Sparse(이상치) + Dense(SVD+SmoothQuant) 세 브랜치 구조"""
+    """
+    RPCA 분해: W = L + S (Inexact ALM)
+      L (low-rank dense) → SmoothQuant → quantize → SVD error correction (lora)
+      S (sparse outliers) → FP16 고정밀도 branch
 
-    def __init__(self, original_linear, act_mode, wgt_mode, alpha=0.5, rank=32, block_size=16, outlier_ratio=0.01, dtype=torch.float32):
+    SVD와 구조적 차이:
+      SVD:  2 branches — quantized(W) + lora
+      RPCA: 3 branches — quantized(L) + lora(L_err) + sparse(S)
+    """
+
+    def __init__(self, original_linear, act_mode, wgt_mode, alpha=0.5, rank=32,
+                 block_size=16, rpca_lam=None, dtype=torch.float32):
         super().__init__()
         self.target_dtype = dtype
         self.act_mode = act_mode
@@ -173,7 +210,7 @@ class ManualRPCALinear(nn.Module):
         self.alpha = alpha
         self.rank = rank
         self.block_size = block_size
-        self.outlier_ratio = outlier_ratio
+        self.rpca_lam = rpca_lam
         self.register_buffer("weight", original_linear.weight.data.clone().to(dtype))
         self.bias = nn.Parameter(original_linear.bias.data.clone().to(dtype)) if original_linear.bias is not None else None
         self.register_buffer("w_sparse", torch.zeros_like(original_linear.weight.data).to(dtype))
@@ -187,28 +224,26 @@ class ManualRPCALinear(nn.Module):
     def manual_calibrate_and_rpca(self, x_max):
         x_max = x_max.clamp(min=1e-5).float()
 
-        # Step 1: Sparse / Dense 분리
-        w_abs = self.weight.abs()
-        threshold = torch.quantile(w_abs.view(-1).float(), 1.0 - self.outlier_ratio)
-        sparse_mask = w_abs >= threshold
-        self.w_sparse.copy_((self.weight * sparse_mask).to(self.target_dtype))
-        w_dense = self.weight * (~sparse_mask)
+        # Step 1: RPCA ALM decomposition W = L + S
+        W_float = self.weight.float()
+        L, S = rpca_ialm(W_float, lam=self.rpca_lam)
+        self.w_sparse.copy_(S.to(self.target_dtype))
 
-        # Step 2: Outlier 제거 후 안정화된 Smooth Scale
-        w_max = w_dense.abs().max(dim=0)[0].clamp(min=1e-5).float()
+        # Step 2: SmoothQuant on L (dense low-rank component)
+        w_max = L.abs().max(dim=0)[0].clamp(min=1e-5)
         self.smooth_scale.data = (w_max.pow(1 - self.alpha) / x_max.pow(self.alpha)).to(self.target_dtype)
         self.smooth_scale.data = self.smooth_scale.data.clamp(min=1e-4, max=1e4)
+        w_smoothed = L / self.smooth_scale.float().view(1, -1)
 
-        # Step 3: Dense 행렬 Smoothing + 양자화
-        w_smoothed = w_dense.float() / self.smooth_scale.float().view(1, -1)
+        # Step 3: Quantize smoothed L
         w_q = quantize_to_nvfp4(w_smoothed, self.block_size) if self.wgt_mode == "NVFP4" else quantize_uniform(w_smoothed, self.block_size, mode=self.wgt_mode)
         self.w_quantized.copy_(w_q.to(self.target_dtype))
 
-        # Step 4: 양자화 오차 SVD
+        # Step 4: SVD on quantization error of L
         w_error = w_smoothed - w_q
-        U, S, Vh = torch.linalg.svd(w_error.float(), full_matrices=False)
-        actual_rank = min(self.rank, S.shape[0])
-        sqrt_S = torch.sqrt(S[:actual_rank])
+        U, Sv, Vh = torch.linalg.svd(w_error.float(), full_matrices=False)
+        actual_rank = min(self.rank, Sv.shape[0])
+        sqrt_S = torch.sqrt(Sv[:actual_rank])
         lora_a_data = torch.zeros(self.rank, self.weight.shape[1], dtype=self.target_dtype, device=x_max.device)
         lora_a_data[:actual_rank, :] = (Vh[:actual_rank, :] * sqrt_S.unsqueeze(1)).to(self.target_dtype)
         self.lora_a.data = lora_a_data
@@ -245,8 +280,7 @@ def main():
     # 양자화 방법
     parser.add_argument("--quant_method", type=str, default="RPCA", choices=["BASELINE", "RPCA"],
                         help="BASELINE: mtq.NVFP4_SVDQUANT_DEFAULT_CFG / RPCA: ManualRPCALinear")
-    parser.add_argument("--outlier_ratio", type=float, default=0.01,
-                        help="RPCA: 가중치 상위 outlier_ratio 비율을 Sparse branch로 분리 (0.01=1%%)")
+    # outlier_ratio 제거됨 — RPCA는 IALM 알고리즘으로 자동 분해 (lam=1/sqrt(max(m,n)))
     # RPCA 하이퍼파라미터
     quant_modes = ["NVFP4", "INT8", "INT4", "INT3", "INT2", "TERNARY"]
     parser.add_argument("--act_mode", type=str, default="NVFP4", choices=quant_modes)
@@ -278,7 +312,7 @@ def main():
         accelerator.print(f"  Method : {args.quant_method}")
         if args.quant_method == "RPCA":
             accelerator.print(f"  Act    : {args.act_mode}  |  Wgt: {args.wgt_mode}")
-            accelerator.print(f"  Outlier ratio: {args.outlier_ratio}  |  Rank: {args.lowrank}")
+            accelerator.print(f"  RPCA λ: auto (IALM)  |  Rank: {args.lowrank}")
         accelerator.print(f"  Samples: {s_count}  |  Dataset: {args.dataset_name}")
         accelerator.print(f"  Save   : {dataset_save_dir}")
         accelerator.print(f"{'='*60}\n")
@@ -364,7 +398,7 @@ def main():
                 new_layer = ManualRPCALinear(
                     orig_m, args.act_mode, args.wgt_mode,
                     args.alpha, args.lowrank, args.block_size,
-                    args.outlier_ratio, target_dtype
+                    rpca_lam=None, dtype=target_dtype
                 ).to(device)
                 if name in all_samples:
                     new_layer.manual_calibrate_and_rpca(all_samples[name])
@@ -430,7 +464,7 @@ def main():
             "quant_method": args.quant_method,
             "act_mode": args.act_mode if args.quant_method == "RPCA" else "N/A",
             "wgt_mode": args.wgt_mode if args.quant_method == "RPCA" else "N/A",
-            "outlier_ratio": args.outlier_ratio if args.quant_method == "RPCA" else "N/A",
+            "rpca_decomp": "IALM(auto_lam)" if args.quant_method == "RPCA" else "N/A",
             "lowrank": args.lowrank,
             "block_size": args.block_size if args.quant_method == "RPCA" else "N/A",
             "alpha": args.alpha if args.quant_method == "RPCA" else "N/A",

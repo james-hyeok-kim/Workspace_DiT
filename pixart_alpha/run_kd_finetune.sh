@@ -3,14 +3,15 @@
 # Fast KD Fine-tuning Ablation
 #
 # Base PTQ configs:
-#   RPCA-NVFP4 OR=0.1  (best PTQ: FID=119.4, IS=1.762)
-#   SVD-NVFP4          (비교용)
+#   RPCA-NVFP4 (IALM auto-λ)   ← proper RPCA with sparse branch
+#   SVD-NVFP4                   (비교용)
 #
 # KD ablation:
-#   KD-0    : PTQ only (no KD)    ← 기존 결과 참조
-#   KD-100  : 100 steps (~3 min)
-#   KD-300  : 300 steps (~10 min)  ← 주력
-#   KD-1000 : 1000 steps (~30 min) ← 상한선
+#   no-KD : PTQ only (RPCA IALM, proper sparse branch)
+#   KD-30  : 30 steps  (~1 min)
+#   KD-50  : 50 steps  (~2 min)
+#   KD-70  : 70 steps  (~3 min)
+#   KD-100 : 100 steps (~4 min)  ← 상한선
 # ============================================================
 
 export PYTHONUNBUFFERED=1
@@ -25,7 +26,6 @@ MODEL_PATH="PixArt-alpha/PixArt-XL-2-1024-MS"
 DATASET="MJHQ"
 BLOCK_SIZE=16
 LOWRANK=32
-OUTLIER_RATIO=0.0
 REF_DIR="/data/james_dit_ref/ref_images_fp16"
 BASE_DIR="$(pwd)"
 LOG_DIR="${BASE_DIR}/logs/kd_experiment"
@@ -38,7 +38,7 @@ if [ "${TEST_MODE:-0}" = "1" ]; then
   echo "[TEST MODE] NUM_SAMPLES=2, KD_STEPS=10"
 else
   NUM_SAMPLES=20
-  KD_STEPS_LIST="100 300 1000"
+  KD_STEPS_LIST="30 50 70 100"
 fi
 
 RUN_LOG="${LOG_DIR}/run.log"
@@ -50,8 +50,30 @@ PY="${BASE_DIR}/pixart_kd_finetune.py"
 echo "============================================================"
 echo "  Fast KD Fine-tuning Ablation"
 echo "  Started: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "  NUM_SAMPLES=${NUM_SAMPLES}  LOWRANK=${LOWRANK}  OR=${OUTLIER_RATIO}"
+echo "  NUM_SAMPLES=${NUM_SAMPLES}  LOWRANK=${LOWRANK}  RPCA=IALM(auto)"
 echo "============================================================"
+
+# ---- RPCA-NVFP4 no-KD (PTQ only, proper IALM sparse branch) ----
+NOKD_SAVE="${BASE_DIR}/results/kd_experiment/RPCA_NVFP4_NOKD"
+echo ""
+echo "---- RPCA-NVFP4 no-KD  ($(date '+%H:%M:%S')) ----"
+if [ -f "${NOKD_SAVE}/${DATASET}/metrics.json" ]; then
+    echo "  [SKIP] already exists."
+else
+    ${ACCEL_CMD} "${PY}" \
+        --quant_method RPCA \
+        --act_mode NVFP4 \
+        --wgt_mode NVFP4 \
+        --lowrank ${LOWRANK} \
+        --block_size ${BLOCK_SIZE} \
+        --model_path "${MODEL_PATH}" \
+        --dataset_name "${DATASET}" \
+        --ref_dir "${REF_DIR}" \
+        --save_dir "${NOKD_SAVE}" \
+        --num_samples ${NUM_SAMPLES} \
+        2>&1 | tee "${LOG_DIR}/rpca_nokd.log"
+    echo "  [$(date '+%H:%M:%S')] RPCA no-KD done."
+fi
 
 # ---- RPCA-NVFP4 + KD ablation ----
 for KD_STEPS in ${KD_STEPS_LIST}; do
@@ -65,7 +87,6 @@ for KD_STEPS in ${KD_STEPS_LIST}; do
             --quant_method RPCA \
             --act_mode NVFP4 \
             --wgt_mode NVFP4 \
-            --outlier_ratio ${OUTLIER_RATIO} \
             --lowrank ${LOWRANK} \
             --block_size ${BLOCK_SIZE} \
             --model_path "${MODEL_PATH}" \
@@ -82,8 +103,8 @@ for KD_STEPS in ${KD_STEPS_LIST}; do
     fi
 done
 
-# ---- SVD-NVFP4 + KD-300 (비교용) ----
-SVD_KD_STEPS=300
+# ---- SVD-NVFP4 + KD-50 (비교용) ----
+SVD_KD_STEPS=50
 SVD_SAVE="${BASE_DIR}/results/kd_experiment/SVD_NVFP4_KD${SVD_KD_STEPS}"
 echo ""
 echo "---- SVD-NVFP4 + KD-${SVD_KD_STEPS}  ($(date '+%H:%M:%S')) ----"
@@ -129,16 +150,18 @@ def load(path):
 entries = [
     ("BASELINE (NVFP4_DEFAULT_CFG)",
      load(f"{base}/results/quip_experiment/BASELINE/{ds}/metrics.json")),
-    ("RPCA-NVFP4 OR=0.1 (no KD)",
-     load(f"{base}/results/rpca_sweep/RPCA_ANVFP4_WNVFP4_OR0.1/{ds}/metrics.json")),
+    ("RPCA-NVFP4 no-KD (IALM)",
+     load(f"{base}/results/kd_experiment/RPCA_NVFP4_NOKD/{ds}/metrics.json")),
+    ("RPCA-NVFP4 + KD-30",
+     load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD30/{ds}/metrics.json")),
+    ("RPCA-NVFP4 + KD-50",
+     load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD50/{ds}/metrics.json")),
+    ("RPCA-NVFP4 + KD-70",
+     load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD70/{ds}/metrics.json")),
     ("RPCA-NVFP4 + KD-100",
      load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD100/{ds}/metrics.json")),
-    ("RPCA-NVFP4 + KD-300",
-     load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD300/{ds}/metrics.json")),
-    ("RPCA-NVFP4 + KD-1000",
-     load(f"{base}/results/kd_experiment/RPCA_NVFP4_KD1000/{ds}/metrics.json")),
-    ("SVD-NVFP4 + KD-300",
-     load(f"{base}/results/kd_experiment/SVD_NVFP4_KD300/{ds}/metrics.json")),
+    ("SVD-NVFP4 + KD-50",
+     load(f"{base}/results/kd_experiment/SVD_NVFP4_KD50/{ds}/metrics.json")),
 ]
 
 bl = next((d for n, d in entries if "BASELINE" in n and d), None)

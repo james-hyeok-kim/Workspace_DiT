@@ -140,6 +140,14 @@ Uses `mtq.NVFP4_SVDQUANT_DEFAULT_CFG` unmodified (except injected `lowrank`). Re
 | `--fp8_format` | `e4m3` | `e4m3`, `e5m2`, or `hybrid` (auto-selects per-layer) |
 | `--num_samples` | 100 | Images to generate; use `--test_run` for 2-sample smoke test |
 
+## Time Zone
+
+Always use **KST (Korea Standard Time, UTC+9)** when displaying or referencing any timestamps, dates, or times. Do not use UTC or other time zones unless explicitly requested.
+
+## Long-Running Tasks
+
+For tasks that take more than a few minutes, report progress at 0%, 25%, 50%, 75%, and 100% milestones so the user knows the current state.
+
 ## Outputs
 
 Results saved to `--save_dir` (default `results/`):

@@ -374,16 +374,33 @@ class TimestepAwarePTQLinear(nn.Module):
             self.scale_correction[g].copy_(v_g.to(self.target_dtype))
 
         # ---- Step 7: Per-group rank-t additional correction (Direction 2) ----
-        # Residual per group AFTER global lora: W/smooth_g - W_q - lora_reconstruct
-        # Applied with x_smooth_global in forward → no high-rank issue since x uses global scale
+        # For each group g:
+        #   W_smooth_g = W_rot / smooth_g  (per-group smooth space)
+        #   W_q_g      = quantize(W_smooth_g) with same act_order + block structure
+        #   residual_g = W_smooth_g - W_q_g  (per-group quantization error)
+        # Applied with x_smooth_g in forward → consistent space, no scale distortion
         if self.use_ts_correction:
             for g in range(self.n_groups):
-                smooth_g  = self.smooth_scales[g].float().to(device)
+                smooth_g   = self.smooth_scales[g].float().to(device)
                 W_smooth_g = W_rot / smooth_g.unsqueeze(0)
-                residual_g = W_smooth_g - W_q - global_lora_reconstruct
+
+                # Quantize W_smooth_g with the same act_order and block structure as global W_q
+                W_sg_reord   = W_smooth_g[:, order]
+                W_q_g_reord  = torch.zeros_like(W_sg_reord)
+                for g_start in range(0, in_f, gs):
+                    g_end   = min(g_start + gs, in_f)
+                    grp_w   = W_sg_reord[:, g_start:g_end]
+                    if self.wgt_bits == "NVFP4":
+                        W_q_g_reord[:, g_start:g_end] = quantize_to_nvfp4(
+                            grp_w, block_size=g_end - g_start)
+                    else:
+                        W_q_g_reord[:, g_start:g_end] = quantize_uniform(
+                            grp_w, block_size=g_end - g_start, mode=self.wgt_bits)
+                W_q_g      = W_q_g_reord[:, inv_order]
+                residual_g = W_smooth_g - W_q_g  # pure per-group quantization error
 
                 Ug2, Sg2, Vhg2 = torch.linalg.svd(residual_g.float(), full_matrices=False)
-                r_t     = min(self.rank_t, Sg2.shape[0])
+                r_t      = min(self.rank_t, Sg2.shape[0])
                 sqrt_Sg2 = Sg2[:r_t].sqrt()
 
                 da = torch.zeros(self.rank_t, in_f,  dtype=self.target_dtype, device=device)
@@ -427,8 +444,9 @@ class TimestepAwarePTQLinear(nn.Module):
         out = out + F.linear(F.linear(x_smooth_global, self.lora_a), self.lora_b)
 
         # Per-group rank-t additional correction (Direction 2)
+        # Apply with x_smooth_g (same space as calibration residual W_smooth_g - W_q_g)
         if self.use_ts_correction and self.delta_a is not None:
-            out = out + F.linear(F.linear(x_smooth_global, self.delta_a[g]), self.delta_b[g])
+            out = out + F.linear(F.linear(x_smooth_g, self.delta_a[g]), self.delta_b[g])
 
         if self.bias is not None:
             out = out + self.bias

@@ -11,7 +11,7 @@ Pipeline:
 
 Usage:
   accelerate launch --multi_gpu --num_processes 2 pixart_kd_finetune.py \\
-      --quant_method RPCA --outlier_ratio 0.1 --lowrank 32 \\
+      --quant_method RPCA --lowrank 32 \\
       --do_kd --kd_steps 300 --kd_lr 1e-4 \\
       --save_dir results/kd_experiment/RPCA_NVFP4_KD300
 """
@@ -25,6 +25,8 @@ import json
 import numpy as np
 import copy
 import gc
+import time
+import math
 from PIL import Image
 from diffusers import PixArtAlphaPipeline, DPMSolverMultistepScheduler
 from tqdm import tqdm
@@ -111,6 +113,49 @@ def quantize_to_nvfp4(x, block_size=16):
     return x_q.view(-1)[:num_el].view(orig_shape)
 
 
+def rpca_ialm(W, lam=None, max_iter=20, tol=1e-5):
+    """
+    W = L + S via Inexact ALM (Candes et al. 2009).
+    L: low-rank dense component  →  quantize
+    S: sparse component (outliers)  →  keep in FP16
+
+    lam: sparsity regularization. Default = 1/sqrt(max(m,n)).
+    """
+    m, n = W.shape
+    if lam is None:
+        lam = 1.0 / math.sqrt(max(m, n))
+
+    L = torch.zeros_like(W)
+    S = torch.zeros_like(W)
+    Y = W.clone()
+
+    norm_fro = W.norm(p='fro').clamp(min=1e-10)
+    mu = float(m * n) / (4.0 * float(W.abs().sum().clamp(min=1e-10)))
+    mu_bar = mu * 1e7
+    rho = 1.5
+
+    for _ in range(max_iter):
+        # Update L: soft-threshold singular values (SVT)
+        T = W - S + Y / mu
+        U, sv, Vh = torch.linalg.svd(T, full_matrices=False)
+        sv_t = torch.clamp(sv - 1.0 / mu, min=0)
+        L = (U * sv_t.unsqueeze(0)) @ Vh
+
+        # Update S: element-wise soft threshold
+        R = W - L + Y / mu
+        S = torch.sign(R) * torch.clamp(R.abs() - lam / mu, min=0)
+
+        # Update Lagrange multiplier
+        residual = W - L - S
+        Y = Y + mu * residual
+        mu = min(mu * rho, mu_bar)
+
+        if residual.norm(p='fro') / norm_fro < tol:
+            break
+
+    return L, S
+
+
 def get_module_by_name(model, name):
     for part in name.split("."):
         model = getattr(model, part)
@@ -181,9 +226,18 @@ class ManualSVDLinear(nn.Module):
 
 
 class ManualRPCALinear(nn.Module):
-    """RPCA 분해: Sparse(이상치) + Dense(SVD+SmoothQuant) 세 브랜치 구조"""
+    """
+    RPCA 분해: W = L + S (Inexact ALM)
+      L (low-rank dense) → SmoothQuant → quantize → SVD error correction (lora)
+      S (sparse outliers) → FP16 고정밀도 branch
 
-    def __init__(self, original_linear, act_mode, wgt_mode, alpha=0.5, rank=32, block_size=16, outlier_ratio=0.01, dtype=torch.float32):
+    SVD와 구조적 차이:
+      SVD:  2 branches — quantized(W) + lora
+      RPCA: 3 branches — quantized(L) + lora(L_err) + sparse(S)
+    """
+
+    def __init__(self, original_linear, act_mode, wgt_mode, alpha=0.5, rank=32,
+                 block_size=16, rpca_lam=None, dtype=torch.float32):
         super().__init__()
         self.target_dtype = dtype
         self.act_mode = act_mode
@@ -191,7 +245,7 @@ class ManualRPCALinear(nn.Module):
         self.alpha = alpha
         self.rank = rank
         self.block_size = block_size
-        self.outlier_ratio = outlier_ratio
+        self.rpca_lam = rpca_lam  # None → auto = 1/sqrt(max(m,n))
         self.register_buffer("weight", original_linear.weight.data.clone().to(dtype))
         self.bias = nn.Parameter(original_linear.bias.data.clone().to(dtype)) if original_linear.bias is not None else None
         self.register_buffer("w_sparse", torch.zeros_like(original_linear.weight.data).to(dtype))
@@ -204,21 +258,27 @@ class ManualRPCALinear(nn.Module):
     @torch.no_grad()
     def manual_calibrate_and_rpca(self, x_max):
         x_max = x_max.clamp(min=1e-5).float()
-        w_abs = self.weight.abs()
-        threshold = torch.quantile(w_abs.view(-1).float(), 1.0 - self.outlier_ratio)
-        sparse_mask = w_abs >= threshold
-        self.w_sparse.copy_((self.weight * sparse_mask).to(self.target_dtype))
-        w_dense = self.weight * (~sparse_mask)
-        w_max = w_dense.abs().max(dim=0)[0].clamp(min=1e-5).float()
+
+        # Step 1: RPCA ALM decomposition W = L + S
+        W_float = self.weight.float()
+        L, S = rpca_ialm(W_float, lam=self.rpca_lam)
+        self.w_sparse.copy_(S.to(self.target_dtype))
+
+        # Step 2: SmoothQuant on L (dense low-rank component)
+        w_max = L.abs().max(dim=0)[0].clamp(min=1e-5)
         self.smooth_scale.data = (w_max.pow(1 - self.alpha) / x_max.pow(self.alpha)).to(self.target_dtype)
         self.smooth_scale.data = self.smooth_scale.data.clamp(min=1e-4, max=1e4)
-        w_smoothed = w_dense.float() / self.smooth_scale.float().view(1, -1)
+        w_smoothed = L / self.smooth_scale.float().view(1, -1)
+
+        # Step 3: Quantize smoothed L
         w_q = quantize_to_nvfp4(w_smoothed, self.block_size) if self.wgt_mode == "NVFP4" else quantize_uniform(w_smoothed, self.block_size, mode=self.wgt_mode)
         self.w_quantized.copy_(w_q.to(self.target_dtype))
+
+        # Step 4: SVD on quantization error of L
         w_error = w_smoothed - w_q
-        U, S, Vh = torch.linalg.svd(w_error.float(), full_matrices=False)
-        actual_rank = min(self.rank, S.shape[0])
-        sqrt_S = torch.sqrt(S[:actual_rank])
+        U, Sv, Vh = torch.linalg.svd(w_error.float(), full_matrices=False)
+        actual_rank = min(self.rank, Sv.shape[0])
+        sqrt_S = torch.sqrt(Sv[:actual_rank])
         lora_a_data = torch.zeros(self.rank, self.weight.shape[1], dtype=self.target_dtype, device=x_max.device)
         lora_a_data[:actual_rank, :] = (Vh[:actual_rank, :] * sqrt_S.unsqueeze(1)).to(self.target_dtype)
         self.lora_a.data = lora_a_data
@@ -249,16 +309,17 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
     Teacher: frozen FP16 transformer
     Student: quantized transformer (ManualRPCALinear / ManualSVDLinear)
 
-    Multi-GPU: accelerate handles gradient sync automatically since lora params
-    are regular nn.Parameters wrapped by accelerator.prepare().
+    Multi-GPU: DDP wrapper를 사용하지 않고 torch.distributed.all_reduce로 직접 gradient sync.
+    이를 통해 float32 lora 파라미터와 float16 evaluation 사이의 dtype 충돌을 방지.
     """
+    import torch.distributed as dist
+
     device = accelerator.device
     n_kd_steps = args.kd_steps
     lr = args.kd_lr
     kd_prompts = calib_prompts[:args.kd_prompts]
 
     # Upcast lora_a/lora_b to float32 for stable AdamW optimization
-    # (FP16 gradients cannot be unscaled by the optimizer)
     for name, p in pipe.transformer.named_parameters():
         if "lora_a" in name or "lora_b" in name:
             p.data = p.data.float()
@@ -275,13 +336,11 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
     optimizer = torch.optim.AdamW(trainable, lr=lr, weight_decay=1e-4)
     lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_kd_steps, eta_min=lr * 0.01)
 
-    # latent shape (before accelerator.prepare wraps transformer into DDP)
     B = len(kd_prompts)
     latent_channels = pipe.transformer.config.in_channels
     latent_h = latent_w = 128  # 1024px / 8 (VAE downscale)
-    latents = torch.randn(B, latent_channels, latent_h, latent_w, device=device, dtype=torch.float16)
 
-    # Pre-encode prompts (once, before prepare)
+    # Pre-encode prompts
     accelerator.print("  Pre-encoding KD prompts...")
     with torch.no_grad():
         prompt_embeds_list = []
@@ -293,7 +352,6 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
                 num_images_per_prompt=1,
                 device=device,
             )
-            # encode_prompt returns (prompt_embeds, prompt_attention_mask, ...)
             if isinstance(enc, (tuple, list)):
                 pe = enc[0]
                 pm = enc[1] if len(enc) > 1 else None
@@ -303,27 +361,30 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
             if pm is not None:
                 prompt_masks_list.append(pm)
 
-    prompt_embeds = torch.cat(prompt_embeds_list, dim=0)  # (B, seq, dim)
+    prompt_embeds = torch.cat(prompt_embeds_list, dim=0)
     prompt_masks = torch.cat(prompt_masks_list, dim=0) if prompt_masks_list else None
 
-    # accelerate wraps student transformer + optimizer for gradient sync
-    pipe.transformer, optimizer = accelerator.prepare(pipe.transformer, optimizer)
+    # Fixed latents (same seed on all ranks for consistent gradients)
+    generator = torch.Generator(device=device).manual_seed(42)
+    latents = torch.randn(B, latent_channels, latent_h, latent_w,
+                          device=device, dtype=torch.float16, generator=generator)
 
-    # KD loop
+    # KD loop — NO accelerator.prepare, use torch.distributed.all_reduce directly
     pipe.transformer.train()
     teacher_transformer.eval()
     teacher_transformer.requires_grad_(False)
 
+    num_processes = accelerator.num_processes
     accelerator.print(f"  Starting KD: {n_kd_steps} steps, lr={lr}")
     loss_log = []
 
     for step in range(n_kd_steps):
-        # Random timesteps
+        # Sync random seed across ranks so t and noise are identical → identical gradients
+        torch.manual_seed(step + 1000)
         t = torch.randint(0, 1000, (B,), device=device)
+        noise = torch.randn(B, latent_channels, latent_h, latent_w,
+                            device=device, dtype=torch.float16)
 
-        # Add noise
-        noise = torch.randn_like(latents)
-        # Use scheduler's add_noise if available, otherwise manual
         if hasattr(pipe.scheduler, "add_noise"):
             noisy_latents = pipe.scheduler.add_noise(latents, noise, t)
         else:
@@ -331,13 +392,11 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
             sigma_t = (1 - pipe.scheduler.alphas_cumprod[t]).to(device).view(-1, 1, 1, 1).sqrt()
             noisy_latents = alpha_t * latents + sigma_t * noise
 
-        # PixArt-Alpha requires added_cond_kwargs for adaln_single conditioning
-        # resolution/aspect_ratio tensors needed for 1024px model (sample_size=128)
         resolution = torch.tensor([[1024, 1024]], dtype=noisy_latents.dtype, device=device).repeat(B, 1)
         aspect_ratio = torch.tensor([[1.0]], dtype=noisy_latents.dtype, device=device).repeat(B, 1)
         added_cond_kwargs = {"resolution": resolution, "aspect_ratio": aspect_ratio}
 
-        # Teacher prediction (no grad, FP16)
+        # Teacher prediction (no grad)
         with torch.no_grad():
             teacher_kwargs = dict(
                 hidden_states=noisy_latents,
@@ -350,7 +409,7 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
             teacher_out = teacher_transformer(**teacher_kwargs)
             teacher_pred = teacher_out.sample if hasattr(teacher_out, "sample") else teacher_out[0]
 
-        # Student prediction (grad through lora only)
+        # Student prediction
         student_kwargs = dict(
             hidden_states=noisy_latents,
             encoder_hidden_states=prompt_embeds,
@@ -365,9 +424,16 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
         loss = F.mse_loss(student_pred.float(), teacher_pred.float())
 
         optimizer.zero_grad()
-        accelerator.backward(loss)
-        # Gradient clip to prevent lora divergence
-        accelerator.clip_grad_norm_(trainable, max_norm=1.0)
+        loss.backward()
+
+        # Manual gradient allreduce (since same inputs on all ranks, grads are identical,
+        # but allreduce is cheap insurance and keeps models in sync)
+        if num_processes > 1 and dist.is_initialized():
+            for p in trainable:
+                if p.grad is not None:
+                    dist.all_reduce(p.grad, op=dist.ReduceOp.AVG)
+
+        torch.nn.utils.clip_grad_norm_(trainable, max_norm=1.0)
         optimizer.step()
         lr_scheduler.step()
 
@@ -377,12 +443,13 @@ def run_kd_finetuning(pipe, teacher_transformer, calib_prompts, args, accelerato
         if step % 50 == 0 and accelerator.is_main_process:
             accelerator.print(f"  [KD] step {step:4d}/{n_kd_steps}  loss={loss_val:.5f}  lr={lr_scheduler.get_last_lr()[0]:.2e}")
 
+    # Revert lora back to float16 for inference — keeps all params consistent
+    for name, p in pipe.transformer.named_parameters():
+        if "lora_a" in name or "lora_b" in name:
+            p.data = p.data.half()
     pipe.transformer.eval()
 
-    if accelerator.is_main_process:
-        accelerator.print(f"  KD complete. Initial loss={loss_log[0]:.5f} → Final loss={loss_log[-1]:.5f}")
-        # Save loss curve
-        return loss_log
+    accelerator.print(f"  KD complete. Initial loss={loss_log[0]:.5f} → Final loss={loss_log[-1]:.5f}")
     return loss_log
 
 
@@ -400,9 +467,7 @@ def main():
     parser.add_argument("--dataset_name", type=str, default="MJHQ", choices=["MJHQ", "sDCI"])
     # 양자화 방법
     parser.add_argument("--quant_method", type=str, default="RPCA", choices=["BASELINE", "RPCA", "SVD"],
-                        help="BASELINE: mtq / RPCA: ManualRPCALinear / SVD: ManualSVDLinear")
-    parser.add_argument("--outlier_ratio", type=float, default=0.1,
-                        help="RPCA only: top-k weight fraction for sparse branch")
+                        help="BASELINE: mtq / RPCA: ManualRPCALinear(W=L+S ALM) / SVD: ManualSVDLinear")
     # 공통 하이퍼파라미터
     quant_modes = ["NVFP4", "INT8", "INT4", "INT3", "INT2", "TERNARY"]
     parser.add_argument("--act_mode", type=str, default="NVFP4", choices=quant_modes)
@@ -442,12 +507,14 @@ def main():
             accelerator.print(f"  Act    : {args.act_mode}  |  Wgt: {args.wgt_mode}")
             accelerator.print(f"  Rank   : {args.lowrank}   |  Block: {args.block_size}")
         if args.quant_method == "RPCA":
-            accelerator.print(f"  Outlier ratio: {args.outlier_ratio}")
+            accelerator.print(f"  RPCA λ: auto (1/sqrt(max(m,n)))")
         if args.do_kd:
             accelerator.print(f"  KD steps: {args.kd_steps}  lr: {args.kd_lr}  prompts: {args.kd_prompts}")
         accelerator.print(f"  Samples: {s_count}  |  Dataset: {args.dataset_name}")
         accelerator.print(f"  Save   : {dataset_save_dir}")
         accelerator.print(f"{'='*60}\n")
+
+    t_total_start = time.time()
 
     # ------------------------------------------
     # Phase 1: Reference FP16 이미지 생성 (존재하면 skip)
@@ -471,6 +538,7 @@ def main():
     # ------------------------------------------
     # Phase 2: 양자화 모델 준비
     # ------------------------------------------
+    t_ptq_start = time.time()
     accelerator.print(f"[Phase 2] Loading and quantizing model ({args.quant_method})...")
     pipe = PixArtAlphaPipeline.from_pretrained(args.model_path, torch_dtype=torch.float16).to(device)
     pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
@@ -537,7 +605,7 @@ def main():
                     new_layer = ManualRPCALinear(
                         orig_m, args.act_mode, args.wgt_mode,
                         args.alpha, args.lowrank, args.block_size,
-                        args.outlier_ratio, target_dtype
+                        rpca_lam=None, dtype=target_dtype
                     ).to(device)
                     if name in all_samples:
                         new_layer.manual_calibrate_and_rpca(all_samples[name])
@@ -552,10 +620,15 @@ def main():
                 set_module_by_name(transformer, name, new_layer)
         accelerator.wait_for_everyone()
 
+    t_ptq_end = time.time()
+    ptq_time = t_ptq_end - t_ptq_start
+
     # ------------------------------------------
     # Phase 2.5: KD Fine-tuning (optional)
     # ------------------------------------------
     kd_loss_log = None
+    kd_time = 0.0
+    t_kd_start = time.time()
     if args.do_kd and args.quant_method != "BASELINE":
         accelerator.print(f"\n[Phase 2.5] KD fine-tuning ({args.kd_steps} steps)...")
 
@@ -572,15 +645,13 @@ def main():
         accelerator.wait_for_everyone()
     elif args.do_kd and args.quant_method == "BASELINE":
         accelerator.print("  [KD] Skipped: BASELINE (mtq) uses quantized params without accessible lora.")
+    kd_time = time.time() - t_kd_start
 
     # ------------------------------------------
     # Phase 3: 이미지 생성 및 메트릭 업데이트
     # ------------------------------------------
+    t_eval_start = time.time()
     accelerator.print("[Phase 3] Generating images and computing metrics...")
-
-    # accelerator.prepare가 Phase 2.5에서 이미 transformer를 wrap했을 수 있음 — unwrap
-    if args.do_kd and args.quant_method != "BASELINE":
-        pipe.transformer = accelerator.unwrap_model(pipe.transformer)
 
     psnr_m = PeakSignalNoiseRatio(data_range=1.0).to(device)
     ssim_m = StructuralSimilarityIndexMeasure(data_range=1.0).to(device)
@@ -613,6 +684,8 @@ def main():
             print(f"  GPU {accelerator.process_index} -> sample_{i}.png", flush=True)
 
     accelerator.wait_for_everyone()
+    eval_time = time.time() - t_eval_start
+    total_time = time.time() - t_total_start
 
     # ------------------------------------------
     # Phase 4: 메트릭 집계 및 저장
@@ -637,7 +710,7 @@ def main():
             "quant_method": args.quant_method,
             "act_mode": args.act_mode,
             "wgt_mode": args.wgt_mode,
-            "outlier_ratio": args.outlier_ratio if args.quant_method == "RPCA" else "N/A",
+            "rpca_decomp": "IALM(auto_lam)" if args.quant_method == "RPCA" else "N/A",
             "lowrank": args.lowrank,
             "block_size": args.block_size,
             "alpha": args.alpha,
@@ -660,6 +733,12 @@ def main():
                 "LPIPS": float(res_lpips),
                 "CLIP": float(np.mean(clip_scores)) if clip_scores else 0.0,
             },
+            "timing_sec": {
+                "ptq":   round(ptq_time, 1),
+                "kd":    round(kd_time, 1),
+                "eval":  round(eval_time, 1),
+                "total": round(total_time, 1),
+            },
         }
         if kd_loss_log:
             final_res["kd_loss"] = {
@@ -672,10 +751,15 @@ def main():
         with open(metrics_path, "w") as f:
             json.dump(final_res, f, indent=4)
 
+        def fmt_time(s):
+            m, sec = divmod(int(s), 60)
+            return f"{m}m{sec:02d}s"
+
         print(f"\n{'='*60}")
         print(f"  Results saved: {metrics_path}")
         print(f"  [PRIMARY]   FID: {res_fid:.4f}  |  IS: {res_is:.4f}")
         print(f"  [SECONDARY] PSNR: {res_psnr:.2f}  SSIM: {res_ssim:.4f}  LPIPS: {res_lpips:.4f}  CLIP: {np.mean(clip_scores):.2f}")
+        print(f"  [TIMING]    PTQ: {fmt_time(ptq_time)}  KD: {fmt_time(kd_time)}  Eval: {fmt_time(eval_time)}  Total: {fmt_time(total_time)}")
         if kd_loss_log:
             print(f"  [KD]        loss: {kd_loss_log[0]:.5f} → {kd_loss_log[-1]:.5f}")
         print(f"{'='*60}\n")
