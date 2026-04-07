@@ -129,9 +129,13 @@ class ManualTuckerLinear(nn.Module):
         G = U1.T @ W_smooth @ U2   # (r, r)
 
         # Quantize Tucker factors
-        self.u1_q.data  = quantize_to_nvfp4(U1, self.block_size).to(self.target_dtype)
-        self.g_q.data   = quantize_uniform(G, self.block_size,
-                                           mode=self.wgt_core_mode).to(self.target_dtype)
+        def _qcore(t):
+            if self.wgt_core_mode == "NVFP4":
+                return quantize_to_nvfp4(t, self.block_size)
+            return quantize_uniform(t, self.block_size, mode=self.wgt_core_mode)
+
+        self.u1_q.data  = quantize_to_nvfp4(U1,  self.block_size).to(self.target_dtype)
+        self.g_q.data   = _qcore(G).to(self.target_dtype)
         self.u2_q.data  = quantize_to_nvfp4(U2t, self.block_size).to(self.target_dtype)
 
         # Truncation error: W_smooth - Tucker_approx
@@ -391,7 +395,8 @@ def main():
                 continue
             img    = Image.open(path).convert("RGB")
             inputs = clip_processor(text=[prompts[i]], images=img,
-                                    return_tensors="pt", padding=True).to(device)
+                                    return_tensors="pt", padding=True,
+                                    truncation=True, max_length=77).to(device)
             clip_scores.append(float(clip_model(**inputs).logits_per_image.item()))
 
         # Compression stats for representative layer

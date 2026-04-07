@@ -98,31 +98,46 @@ def als_parafac(W_3d, r, max_iter=100, tol=1e-5, device=None):
     W_2 = W_3d.permute(1, 0, 2).reshape(n1, m * n2)   # (n1, m*n2)
     W_3 = W_3d.permute(2, 0, 1).reshape(n2, m * n1)   # (n2, m*n1)
 
-    # SVD-based initialization for A (first r left singular vectors)
-    U, _, _ = torch.linalg.svd(W_1, full_matrices=False)
-    A = U[:, :r].contiguous()
+    # SVD-based initialization for A; fall back to random if SVD fails (ill-conditioned)
+    try:
+        U, _, _ = torch.linalg.svd(W_1, full_matrices=False, driver="gesvd")
+        A = U[:, :r].contiguous()
+    except Exception:
+        A = torch.randn(m, r, device=device)
+        A = F.normalize(A, dim=0)
     # Random init for B, C (normalized)
     B = torch.randn(n1, r, device=device)
     C = torch.randn(n2, r, device=device)
     B = F.normalize(B, dim=0)
     C = F.normalize(C, dim=0)
 
+    def _solve(M, rhs):
+        """Solve min ||rhs - M @ x|| robustly via pinv with regularization."""
+        try:
+            return rhs @ torch.linalg.pinv(M)
+        except Exception:
+            reg = 1e-6 * torch.eye(M.shape[0], device=M.device, dtype=M.dtype)
+            return rhs @ torch.linalg.solve(M + reg, torch.eye(M.shape[0], device=M.device, dtype=M.dtype))
+
     prev_err = float("inf")
     for it in range(max_iter):
-        # Update A: A = W_(1) @ (C ⊙ B) @ pinv((CᵀC * BᵀB))
-        KB  = khatri_rao(C, B)                         # (n1*n2, r)
-        V   = (C.T @ C) * (B.T @ B)                   # (r, r)
-        A   = (W_1 @ KB) @ torch.linalg.pinv(V)        # (m,  r)
+        try:
+            # Update A: A = W_(1) @ (C ⊙ B) @ pinv((CᵀC * BᵀB))
+            KB  = khatri_rao(C, B)                         # (n1*n2, r)
+            V   = (C.T @ C) * (B.T @ B)                   # (r, r)
+            A   = _solve(V, (W_1 @ KB).T).T               # (m,  r)
 
-        # Update B: B = W_(2) @ (C ⊙ A) @ pinv((CᵀC * AᵀA))
-        KCA = khatri_rao(C, A)                         # (m*n2, r)
-        V   = (C.T @ C) * (A.T @ A)                   # (r, r)
-        B   = (W_2 @ KCA) @ torch.linalg.pinv(V)       # (n1, r)
+            # Update B: B = W_(2) @ (C ⊙ A) @ pinv((CᵀC * AᵀA))
+            KCA = khatri_rao(C, A)                         # (m*n2, r)
+            V   = (C.T @ C) * (A.T @ A)                   # (r, r)
+            B   = _solve(V, (W_2 @ KCA).T).T              # (n1, r)
 
-        # Update C: C = W_(3) @ (B ⊙ A) @ pinv((BᵀB * AᵀA))
-        KBA = khatri_rao(B, A)                         # (m*n1, r)
-        V   = (B.T @ B) * (A.T @ A)                   # (r, r)
-        C   = (W_3 @ KBA) @ torch.linalg.pinv(V)       # (n2, r)
+            # Update C: C = W_(3) @ (B ⊙ A) @ pinv((BᵀB * AᵀA))
+            KBA = khatri_rao(B, A)                         # (m*n1, r)
+            V   = (B.T @ B) * (A.T @ A)                   # (r, r)
+            C   = _solve(V, (W_3 @ KBA).T).T              # (n2, r)
+        except Exception:
+            break  # Keep current factors if numerical issues arise
 
         # Convergence check (reconstruction error)
         if (it + 1) % 10 == 0:
@@ -446,7 +461,8 @@ def main():
                 continue
             img    = Image.open(path).convert("RGB")
             inputs = clip_processor(text=[prompts[i]], images=img,
-                                    return_tensors="pt", padding=True).to(device)
+                                    return_tensors="pt", padding=True,
+                                    truncation=True, max_length=77).to(device)
             clip_scores.append(float(clip_model(**inputs).logits_per_image.item()))
 
         # Compression for representative layer

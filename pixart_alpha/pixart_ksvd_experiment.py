@@ -595,7 +595,8 @@ def main():
                 continue
             img    = Image.open(path).convert("RGB")
             inputs = clip_processor(text=[prompts[i]], images=img,
-                                    return_tensors="pt", padding=True).to(device)
+                                    return_tensors="pt", padding=True,
+                                    truncation=True, max_length=77).to(device)
             clip_scores.append(float(clip_model(**inputs).logits_per_image.item()))
 
         # Compression stats for representative layer
