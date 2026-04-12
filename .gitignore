@@ -14,9 +14,9 @@ handoff.md
 
 # 생성된 이미지 / reference
 ref_images/
-*.png
-*.jpg
-*.jpeg
+# *.png
+# *.jpg
+# *.jpeg
 
 # diffusion_from_scratch output 폴더들
 output_*/
