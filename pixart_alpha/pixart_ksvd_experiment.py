@@ -391,7 +391,7 @@ def main():
     parser.add_argument("--dataset_name", type=str,   default="MJHQ", choices=["MJHQ", "sDCI"])
     parser.add_argument("--act_mode",      type=str,   default="NVFP4")
     parser.add_argument("--dict_mode",     type=str,   default="FP16",
-                        choices=["FP16", "FP8", "NVFP4", "INT4", "INT3"],
+                        choices=["FP16", "FP8", "NVFP4", "INT8", "INT4", "INT3"],
                         help="Dictionary D quantization precision")
     parser.add_argument("--wgt_reconstruct_mode", type=str, default="NVFP4",
                         choices=["NVFP4", "INT4", "INT3", "INT8"],
