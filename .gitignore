@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# 실험 결과 / 로그 (로컬에만 보관)
+results/
+logs/
+*.log
+handoff.md
+
+# 생성된 이미지 / reference
+ref_images/
+# *.png
+# *.jpg
+# *.jpeg
+
+# diffusion_from_scratch output 폴더들
+output_*/
+
+# 모델 가중치 (용량 큰 파일)
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.ckpt
+
+# HuggingFace 캐시
+.cache/
+hub/
+
+# 환경변수
+.env
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

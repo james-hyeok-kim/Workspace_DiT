@@ -1,0 +1,23 @@
+{
+    "config": {
+        "quant_method": "W3A4",
+        "wgt_bits": "INT3",
+        "lowrank": 64,
+        "block_size": 128,
+        "rotation": "QuIP (random sign + block Hadamard)",
+        "smoothquant": "no",
+        "baseline_lowrank": "N/A",
+        "num_samples": 20,
+        "dataset": "MJHQ"
+    },
+    "primary_metrics": {
+        "FID": 298.4179992675781,
+        "IS": 1.7810509204864502
+    },
+    "secondary_metrics": {
+        "PSNR": 11.76849365234375,
+        "SSIM": 0.442557156085968,
+        "LPIPS": 0.6464627981185913,
+        "CLIP": 31.677323627471925
+    }
+}

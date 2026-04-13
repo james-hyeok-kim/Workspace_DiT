@@ -1,0 +1,23 @@
+{
+    "config": {
+        "quant_method": "RPCA",
+        "act_mode": "INT8",
+        "wgt_mode": "INT8",
+        "outlier_ratio": 0.0,
+        "lowrank": 32,
+        "block_size": 16,
+        "alpha": 0.5,
+        "num_samples": 20,
+        "dataset": "MJHQ"
+    },
+    "primary_metrics": {
+        "FID": 27.08977508544922,
+        "IS": 1.731523871421814
+    },
+    "secondary_metrics": {
+        "PSNR": 24.811742782592773,
+        "SSIM": 0.9286920428276062,
+        "LPIPS": 0.058431513607501984,
+        "CLIP": 35.455808067321776
+    }
+}

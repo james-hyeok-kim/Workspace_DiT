@@ -3,7 +3,10 @@
 # 1. GPU 및 환경 설정
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTHONUNBUFFERED=1
-export HF_TOKEN=""
+# HF_TOKEN
+if [ -f ~/.env ]; then
+  export $(grep -v '^#' ~/.env | xargs)
+fi
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
 # 2. 경로 설정
@@ -12,6 +15,7 @@ REF_DIR="/data/james_dit_ref/ref_images_fp16"
 
 # 3. 테스트 모드 스위치 (1: 테스트, 0: 본 실험)
 TEST_MODE=1
+QUANT_METHOD="RPCA"
 
 # 4. 모드별 파라미터 자동 분기
 if [ "$TEST_MODE" -eq 1 ]; then
@@ -35,8 +39,10 @@ BLOCK_SIZE=16
 NUMERIC="half"
 
 # 🎯 5. 양자화 모드 조합 배열 정의 (원하는 조합만 남기고 지워도 됩니다)
-ACT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
-WGT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+#ACT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+#WGT_MODES=("NVFP4" "INT8" "INT4" "INT3" "INT2" "TERNARY")
+ACT_MODES=("INT8")
+WGT_MODES=("INT8")
 
 mkdir -p "${BASE_DIR}/logs"
 
@@ -74,6 +80,7 @@ for act in "${ACT_MODES[@]}"; do
             --block_size ${BLOCK_SIZE} \
             --numeric_dtype "${NUMERIC}" \
             --dataset_name "${DATA_SET}" \
+            --quant_method "${QUANT_METHOD}" \
             ${FLAGS} \
             2>&1 | tee "${LOG_FILE}"
 

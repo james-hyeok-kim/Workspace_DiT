@@ -1,0 +1,23 @@
+{
+    "config": {
+        "quant_method": "BASELINE",
+        "wgt_bits": "N/A",
+        "lowrank": "N/A",
+        "block_size": "N/A",
+        "rotation": "N/A",
+        "smoothquant": "N/A",
+        "baseline_lowrank": 32,
+        "num_samples": 20,
+        "dataset": "MJHQ"
+    },
+    "primary_metrics": {
+        "FID": 161.3018798828125,
+        "IS": 1.731753945350647
+    },
+    "secondary_metrics": {
+        "PSNR": 15.686239242553711,
+        "SSIM": 0.5901768803596497,
+        "LPIPS": 0.44063541293144226,
+        "CLIP": 34.98066787719726
+    }
+}

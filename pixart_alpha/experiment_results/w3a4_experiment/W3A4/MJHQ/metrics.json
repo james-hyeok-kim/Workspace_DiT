@@ -1,0 +1,22 @@
+{
+    "config": {
+        "quant_method": "W3A4",
+        "wgt_bits": "NVFP4",
+        "lowrank": 32,
+        "block_size": 128,
+        "alpha": 0.5,
+        "baseline_lowrank": "N/A",
+        "num_samples": 20,
+        "dataset": "MJHQ"
+    },
+    "primary_metrics": {
+        "FID": 188.8334197998047,
+        "IS": 1.6669418811798096
+    },
+    "secondary_metrics": {
+        "PSNR": 14.084136009216309,
+        "SSIM": 0.5738276243209839,
+        "LPIPS": 0.4809586703777313,
+        "CLIP": 34.36111469268799
+    }
+}
