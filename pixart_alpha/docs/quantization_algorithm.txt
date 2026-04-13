@@ -1,0 +1,239 @@
+================================================================================
+  Per-Block Mixed-Precision Quantization Algorithm
+  DiT Transformer (PixArt-Alpha / General)
+================================================================================
+
+목적: DiT transformer 각 블록에 최적 (format, block_size) 자동 결정
+입력: FP16 pretrained model weights
+출력: final_config.csv — 블록별 (format, block_size)
+비용: ~1분 (이미지 생성 불필요)
+구현: pixart_layer_sensitivity.py  --phase criteria
+
+--------------------------------------------------------------------------------
+  Phase A: Weight Statistics  (~45초)
+--------------------------------------------------------------------------------
+
+목적: 모든 format의 Q-SNR을 측정해서 bit-width 결정에 필요한 근거 확보
+
+per layer (N_blocks × 10 layers):
+
+  [1] Per-channel Range Imbalance
+      ch_amax   = max|W| per output channel
+      imbalance = std(ch_amax) / mean(ch_amax)
+      → 클수록 채널간 range 불균일 → fine-grained block_size 필요
+
+  [2] Q-SNR 측정 (8개 format, block_size=32, scale_dtype=FP16)
+      Q-SNR = 20 × log10( ||W||_F / ||W - W_q||_F )
+
+      3-bit: FP3_E1M1 / FP3_E2M0 / FP3_E0M2
+      4-bit: NVFP4    / MXFP4
+      6-bit: MXFP6_E2M3 / MXFP6_E3M2
+      8-bit: MXFP8  (reference)
+
+  [3] gap 계산 (작을수록 해당 bit-width 사용 가능)
+      gap_3bit = SNR(MXFP8) - max( SNR(E1M1), SNR(E2M0), SNR(E0M2) )
+      gap_4bit = SNR(MXFP8) - max( SNR(NVFP4), SNR(MXFP4) )
+      gap_6bit = SNR(MXFP8) - max( SNR(E2M3),  SNR(E3M2)  )
+
+  [4] best sub-format per family (직접 SNR 비교)
+      best_3bit_fmt = argmax{ SNR(E1M1), SNR(E2M0), SNR(E0M2) }
+      best_4bit_fmt = argmax{ SNR(NVFP4), SNR(MXFP4) }
+      best_6bit_fmt = argmax{ SNR(E2M3),  SNR(E3M2)  }
+
+Sub-format 선택 기준:
+
+  Family  │ Sub-format │ Value Grid              │ 언제 유리
+  ────────┼────────────┼─────────────────────────┼──────────────────────────────
+  3-bit   │ E1M1       │ {0, 1, 2, 3}            │ 일반적 weight (중간 범위+정밀도)
+  3-bit   │ E2M0       │ {0, 1, 2, 4}            │ heavy-tail / outlier 많은 분포
+  3-bit   │ E0M2       │ {0, .25, .5, .75}       │ 좁고 균일한 분포 (linear)
+  4-bit   │ NVFP4      │ {0,.5,1,1.5,2,3,4,6}    │ 항상 MXFP4 이상 (FP16 scale)
+          │            │  + FP16 scale            │
+  4-bit   │ MXFP4      │ 동일 grid + E8M0 scale  │ NVFP4 없을 때
+  6-bit   │ E2M3       │ max=7.5  (고정밀)        │ DiT weights 항상 우세
+  6-bit   │ E3M2       │ max=28.0 (wide range)   │ 극단 outlier 있을 때만
+
+출력: weight_stats_analysis.csv  (N_blocks × 10 rows)
+      columns: block_idx, layer, shape, imbalance,
+               snr_FP3_E1M1, snr_FP3_E2M0, snr_FP3_E0M2,
+               snr_NVFP4, snr_MXFP4,
+               snr_MXFP6_E2M3, snr_MXFP6_E3M2, snr_MXFP8,
+               gap_3bit, gap_4bit, gap_6bit,
+               best_3bit_fmt, best_4bit_fmt, best_6bit_fmt
+
+--------------------------------------------------------------------------------
+  Phase B: Format Selection — Cascade-3  (즉시)
+--------------------------------------------------------------------------------
+
+목적: 블록별 최적 bit-width + sub-format 결정
+
+per block:
+
+  ┌─ Level 1: Bit-width 필터  (mean gap across all layers in block)
+  │
+  │   if mean(gap_3bit) < T3 (default 0.5 dB)
+  │       → best_3bit_fmt
+  │         [PixArt-Alpha: gap~20dB → 절대 fire 안 함]
+  │
+  │   elif mean(gap_4bit) < T4 (default 1.0 dB)
+  │       → best_4bit_fmt
+  │         [PixArt-Alpha: gap~12dB → 절대 fire 안 함]
+  │
+  └─ else → Level 2
+
+  ┌─ Level 2: Cascade-3  (6-bit vs 8-bit)
+  │
+  │   per-layer-TYPE 집계  (attn2_kv 제외 — text encoder 고정값, 신호 희석)
+  │
+  │   Layer type 분류:
+  │     attn1_qkv : self-attn  to_q / to_k / to_v
+  │     attn1_out : self-attn  to_out.0
+  │     attn2_q   : cross-attn to_q          (블록마다 변함)
+  │     attn2_kv  : cross-attn to_k / to_v   (text encoder → 블록간 동일, 제외)
+  │     attn2_out : cross-attn to_out.0
+  │     ff        : feedforward net.0 / net.2
+  │
+  │   Feature 집계:
+  │     w_attn2out_gap6   = mean gap_6bit (attn2_out layers)
+  │     w_attn1_mean_gap6 = mean gap_6bit (attn1_qkv + attn1_out layers)
+  │     w_attn2q_imb      = mean imbalance (attn2_q layers)
+  │
+  │   Cascade 규칙 (PixArt-Alpha 보정 threshold):
+  │
+  │   if w_attn2out_gap6 >= 0.100
+  │       → MXFP8  [stage 1: cross-attn out weight 손실 큼]
+  │
+  │   elif w_attn1_mean_gap6 >= 0.346
+  │       → MXFP8  [stage 2: self-attn weight 전반적으로 민감]
+  │
+  │   elif w_attn2q_imb <= 0.112
+  │       → MXFP8  [stage 3: cross-attn Q 분포 균일 → 8bit 효과적]
+  │
+  └─ else → best_6bit_fmt  [= MXFP6_E2M3 in PixArt-Alpha]
+
+  Level 3: sub-format은 Phase A best_Xbit_fmt 자동 사용
+
+성능 (PixArt-Alpha 28블록):
+  LOO accuracy     : 85.7%  (24/28)
+  FID-weighted acc : 92.0%
+  나머지 4개 miss  :
+    Block 6,7  — significant miss (FID margin 3.91, 1.77)
+    Block 8,24 — coin-flip (margin < 0.1, FID 차이 노이즈 수준)
+
+출력: cascade_predictions.csv    (N_blocks rows)
+      cascade_vs_empirical.csv   (N_blocks rows, Phase 1 비교)
+
+--------------------------------------------------------------------------------
+  Phase C: Block Size Tuning  (~30초)
+--------------------------------------------------------------------------------
+
+목적: Phase B format 고정, block_size 증가로 scale overhead memory 절약
+
+per block:
+  format     = Phase B 결정값  (고정)
+  candidates = [16, 32, 64, 128, 256]
+
+  for bs in candidates:
+    SNR[bs]    = mean Q-SNR (all layers, 해당 format, 해당 bs)
+    memory[bs] = N × (bits/8)        ← weight bytes
+               + ceil(N / bs) × 2   ← scale bytes (FP16, 2 bytes each)
+
+  optimal_bs = 가장 큰 bs s.t. SNR[bs] >= SNR[32] - tolerance (default 0.5 dB)
+
+Memory 비교 (N = 1M elements 기준):
+
+  Format        │ Weight  │ Scale (bs=32) │ Total   │ vs FP16
+  ──────────────┼─────────┼───────────────┼─────────┼────────
+  FP16          │ 2.000MB │ —             │ 2.000MB │ 1.00×
+  MXFP8  bs=32  │ 1.000MB │ 0.063MB       │ 1.063MB │ 0.53×
+  MXFP8  bs=64  │ 1.000MB │ 0.031MB       │ 1.031MB │ 0.52×
+  MXFP6  bs=32  │ 0.750MB │ 0.063MB       │ 0.813MB │ 0.41×
+  MXFP6  bs=64  │ 0.750MB │ 0.031MB       │ 0.781MB │ 0.39×
+  NVFP4  bs=16  │ 0.500MB │ 0.125MB       │ 0.625MB │ 0.31×
+  NVFP4  bs=32  │ 0.500MB │ 0.063MB       │ 0.563MB │ 0.28×
+
+결과 (PixArt-Alpha):
+  MXFP8 블록 → bs=64  (SNR -0.4dB, scale memory 절반)
+  MXFP6 블록 → bs=32  (bs=64에서 SNR 허용치 초과)
+
+출력: block_size_tuning.csv   (N_blocks × len(candidates) rows)
+      block_size_optimal.csv  (N_blocks rows)
+      final_config.csv        (N_blocks rows)  ← 최종 결과
+
+--------------------------------------------------------------------------------
+  Phase C Ablation: Block Size FID/IS Sweep  (선택, ~30분)
+--------------------------------------------------------------------------------
+
+목적: block_size 변화가 실제 FID / IS에 미치는 영향 정량화
+
+for bs in [16, 32, 64, 128]:
+  전 블록에 Phase B format + bs 균일 적용
+  → full-model 이미지 생성
+  → FID, IS 측정
+
+출력: block_size_fid_ablation.csv
+      columns: block_size, snr_mean_db, memory_total_mb, fid, is_score
+
+--------------------------------------------------------------------------------
+  출력 CSV 파일 요약
+--------------------------------------------------------------------------------
+
+  파일                          │ rows           │ 내용
+  ──────────────────────────────┼────────────────┼───────────────────────────────
+  weight_stats_analysis.csv     │ N_blocks × 10  │ 8 format SNR + gap + best_fmt
+  cascade_predictions.csv       │ N_blocks       │ Phase B 결정 + cascade feature
+  cascade_vs_empirical.csv      │ N_blocks       │ Phase 1 대비 비교 + borderline
+  block_size_tuning.csv         │ N_blocks × 5   │ bs별 SNR-memory trade-off
+  block_size_optimal.csv        │ N_blocks       │ 블록별 최적 bs
+  final_config.csv              │ N_blocks       │ 최종 (format, bs) per block
+  block_size_fid_ablation.csv   │ len(candidates)│ bs별 FID/IS (선택 실행)
+
+--------------------------------------------------------------------------------
+  실행 방법
+--------------------------------------------------------------------------------
+
+# Phase A + B + C  (~1분)
+accelerate launch --num_processes 1 pixart_layer_sensitivity.py \
+    --phase criteria \
+    --model_path "PixArt-alpha/PixArt-XL-2-1024-MS" \
+    --save_dir results/sensitivity \
+    --dataset_name MJHQ
+
+# Phase C FID/IS Ablation  (~30분, 선택)
+accelerate launch --num_processes 1 pixart_layer_sensitivity.py \
+    --phase bs_ablation \
+    --model_path "PixArt-alpha/PixArt-XL-2-1024-MS" \
+    --save_dir results/sensitivity \
+    --dataset_name MJHQ \
+    --ablation_block_sizes 16 32 64 128
+
+# 옵션
+  --bs_tune_candidates  16 32 64 128 256   # Phase C 후보 block_size (default)
+  --bs_snr_tolerance    0.5                # SNR drop 허용치 dB (default)
+  --target_blocks       0 1 2 ... 27       # 분석할 블록 번호 (default: 전체)
+
+--------------------------------------------------------------------------------
+  다른 모델 이식 시 변경 항목
+--------------------------------------------------------------------------------
+
+  항목                  │ PixArt-Alpha             │ 다른 모델
+  ──────────────────────┼──────────────────────────┼──────────────────────────
+  블록 수               │ 28                       │ --target_blocks 수정
+  Cascade-3 threshold   │ 0.100 / 0.346 / 0.112    │ Phase A 데이터로 LOO-CV 재보정
+  T3 (3-bit threshold)  │ 0.5 dB (never fires)     │ 모델에 따라 fire할 수 있음
+  T4 (4-bit threshold)  │ 1.0 dB (never fires)     │ 모델에 따라 fire할 수 있음
+  best_3bit_fmt         │ E2M0 (heavy-tail)         │ Phase A 자동 결정
+  best_6bit_fmt         │ E2M3 (항상)               │ Phase A 자동 결정
+  Layer type 분류       │ attn1/attn2/ff 구조      │ classify_layer_type() 수정
+  attn2_kv 제외 이유    │ text encoder 고정값       │ cross-attn 구조 확인 필요
+
+  Cascade-3 threshold 재보정 방법:
+    1. Phase 1 실행 (블록별 format별 FID 측정)
+    2. pixart_stats_ablation.py 실행
+    3. LOO-CV 최적 threshold 확인
+    4. pixart_layer_sensitivity.py 상단 _CASCADE3_T_* 상수 수정
+
+================================================================================
+  파일 위치: pixart_layer_sensitivity.py
+  작성일: 2026-04-13
+================================================================================
