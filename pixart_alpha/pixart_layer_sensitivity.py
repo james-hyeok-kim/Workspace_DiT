@@ -236,6 +236,17 @@ def quantize_fp3_e0m2(w: torch.Tensor, block_size: int, scale_dtype: str) -> tor
     return _quant_mxfp(w, block_size, scale_dtype, exp_bits=0, man_bits=2)
 
 
+def quantize_int3(w: torch.Tensor, block_size: int, scale_dtype: str) -> torch.Tensor:
+    """INT3: symmetric uniform 3-bit, q_max=3, levels ∈ {-3, -2, -1, 0, 1, 2, 3}."""
+    q_max = 3.0
+    orig = w.shape
+    wf = w.reshape(-1, block_size).float()
+    amax = wf.abs().max(dim=-1, keepdim=True)[0].clamp(min=1e-12)
+    scale = apply_scale_dtype(amax / q_max, scale_dtype)
+    w_q = torch.clamp(torch.round(wf / scale.clamp(min=1e-12)), -q_max, q_max) * scale
+    return w_q.reshape(orig).to(w.dtype)
+
+
 QUANT_FNS = {
     "NVFP4":      quantize_nvfp4,
     "MXFP4":      quantize_mxfp4,
@@ -247,6 +258,8 @@ QUANT_FNS = {
     "FP3_E1M1":   quantize_fp3_e1m1,
     "FP3_E2M0":   quantize_fp3_e2m0,
     "FP3_E0M2":   quantize_fp3_e0m2,
+    # INT3
+    "INT3":        quantize_int3,
 }
 
 ALL_FORMATS      = list(QUANT_FNS.keys())
