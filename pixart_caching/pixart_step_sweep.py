@@ -8,12 +8,14 @@ NVFP4_SVDQUANT_DEFAULT_CFG에서 inference step 수별 FID/IS/속도 트레이�
   - GPU 시간 측정 (time/image)
 
 결과: results/{dataset}/step_sweep/summary.json
+         results/{dataset}/step_sweep/summary.csv
 """
 
 import os
 import time
 import gc
 import copy
+import csv
 import json
 import argparse
 
@@ -301,7 +303,17 @@ def main():
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=4)
 
-        print(f"\n✅ Step sweep complete. Results: {summary_path}")
+        # CSV 저장
+        csv_path = os.path.join(dataset_save_dir, "summary.csv")
+        csv_fields = ["steps", "fid", "is", "psnr", "ssim", "lpips", "clip", "time_per_image_sec"]
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(all_results)
+
+        print(f"\n✅ Step sweep complete.")
+        print(f"   JSON: {summary_path}")
+        print(f"   CSV:  {csv_path}")
         print(f"\n{'Steps':>6} | {'FID':>8} | {'IS':>7} | {'PSNR':>7} | {'SSIM':>7} | {'CLIP':>7} | {'sec/img':>8}")
         print("-" * 65)
         for r in all_results:
