@@ -25,6 +25,8 @@ TEST_RUN=false
 METHODS=("RTN" "SVDQUANT" "MRGPTQ" "FOUROVERSIX")
 CACHES=("none" "deepcache")
 STEPS=(20 15)
+LORA_RANK=8
+LORA_CALIB=4
 
 # ── 인자 파싱 ─────────────────────────────────────────────────────────────────
 while [[ "$#" -gt 0 ]]; do
@@ -33,6 +35,8 @@ while [[ "$#" -gt 0 ]]; do
         --method)        METHODS=("$2"); shift ;;
         --cache)         CACHES=("$2"); shift ;;
         --steps)         STEPS=("$2"); shift ;;
+        --lora_rank)     LORA_RANK="$2"; shift ;;
+        --lora_calib)    LORA_CALIB="$2"; shift ;;
         --num_samples)   NUM_SAMPLES="$2"; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
@@ -79,6 +83,11 @@ for METHOD in "${METHODS[@]}"; do
             echo "   Method=$METHOD  Cache=$CACHE  Steps=$STEP"
             echo "-----------------------------------------------------------"
 
+            LORA_FLAGS=""
+            if [[ "$CACHE" == "cache_lora" ]]; then
+                LORA_FLAGS="--lora_rank $LORA_RANK --lora_calib $LORA_CALIB"
+            fi
+
             $ENV_PYTHON launch \
                 --num_processes 1 \
                 "$PYTHON_SCRIPT" \
@@ -87,6 +96,7 @@ for METHOD in "${METHODS[@]}"; do
                 --num_steps    "$STEP" \
                 --num_samples  "$NUM_SAMPLES" \
                 --guidance_scale 4.5 \
+                $LORA_FLAGS \
                 $TEST_FLAG
 
             echo "✅ Done: $TAG"

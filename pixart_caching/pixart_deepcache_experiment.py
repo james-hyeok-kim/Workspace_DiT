@@ -494,8 +494,9 @@ def generate_and_evaluate(
             fid_m.update(ref_u8, real=True)
             fid_m.update(img_u8, real=False)
 
+            t_str = f"{local_times[-1]:.2f}s" if local_times else "skipped"
             print(f"[GPU {accelerator.process_index}] {config_tag} "
-                  f"sample_{i} ({local_times[-1]:.2f}s)", flush=True)
+                  f"sample_{i} ({t_str})", flush=True)
 
     accelerator.wait_for_everyone()
 
@@ -515,6 +516,7 @@ def generate_and_evaluate(
             inputs = clip_processor(
                 text=[prompts[i]], images=q_img,
                 return_tensors="pt", padding=True,
+                truncation=True, max_length=77,
             ).to(device)
             with torch.no_grad():
                 scores.append(float(clip_model(**inputs).logits_per_image.item()))

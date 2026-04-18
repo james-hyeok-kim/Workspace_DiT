@@ -37,9 +37,18 @@ mkdir -p "$LOG_DIR" "$CONV_DIR"
 
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 
-# ref 이미지는 step count별로 분리 (공정한 비교)
-REF_DIR_20="$SCRIPT_DIR/ref_images_steps20"
-REF_DIR_15="$SCRIPT_DIR/ref_images_steps15"
+# ref 이미지는 /data/james_dit_pixart_xl_mjhq/{precision}_steps{N}/ 사용
+# 없으면 먼저 bash run_generate_refs.sh 실행
+REF_DIR_20="/data/james_dit_pixart_xl_mjhq/fp16_steps20"
+REF_DIR_15="/data/james_dit_pixart_xl_mjhq/fp16_steps15"
+
+for d in "$REF_DIR_20" "$REF_DIR_15"; do
+    if [ ! -d "$d" ] || [ "$(ls "$d"/ref_*.png 2>/dev/null | wc -l)" -lt "$N_MAX" ]; then
+        echo "⚠️  Ref images not ready: $d"
+        echo "   Run first: bash run_generate_refs.sh"
+        exit 1
+    fi
+done
 
 # 저장 디렉토리 (config_tag 기반, 자동 생성)
 SAVE_A="$SAVE_DIR/$DATASET/deepcache/interval1_s${CACHE_START}_e${CACHE_END}_gs4.5_steps20"
@@ -144,7 +153,7 @@ echo "================================================================"
 
 python3 "$SCRIPT_DIR/eval_convergence.py" \
     --sample_dir "$SAVE_A" \
-    --ref_dir    "$REF_DIR_20/$DATASET" \
+    --ref_dir    "$REF_DIR_20" \
     --method     "NVFP4 20-step (baseline)" \
     --ns         "$NS" \
     --time_per_img  "${TIME_A:-3.45}" \
@@ -153,7 +162,7 @@ python3 "$SCRIPT_DIR/eval_convergence.py" \
 
 python3 "$SCRIPT_DIR/eval_convergence.py" \
     --sample_dir "$SAVE_B" \
-    --ref_dir    "$REF_DIR_15/$DATASET" \
+    --ref_dir    "$REF_DIR_15" \
     --method     "NVFP4 15-step (no cache)" \
     --ns         "$NS" \
     --time_per_img  "${TIME_B:-2.94}" \
@@ -162,7 +171,7 @@ python3 "$SCRIPT_DIR/eval_convergence.py" \
 
 python3 "$SCRIPT_DIR/eval_convergence.py" \
     --sample_dir "$SAVE_C" \
-    --ref_dir    "$REF_DIR_15/$DATASET" \
+    --ref_dir    "$REF_DIR_15" \
     --method     "Ours (15-step + DeepCache)" \
     --ns         "$NS" \
     --time_per_img  "${TIME_C:-1.96}" \

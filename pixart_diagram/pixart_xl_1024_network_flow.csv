@@ -1,0 +1,50 @@
+phase,step,module,input_shape,output_shape,params/notes
+text,1,T5Tokenizer,str,"input_ids:[1,120] + mask:[1,120]","max_sequence_length=120, pad_token=0"
+text,2,T5EncoderModel,"input_ids:[1,120]","[1,120,4096]","24 layers, d_model=4096, d_ff=10240, heads=64x64 (~4.76B)"
+text,3,negative_encode,"'':str","[1,120,4096]",uncond
+text,4,CFG_concat,"uncond+cond","[2,120,4096] + mask:[2,120]",do_classifier_free_guidance=True
+latent,5,prepare_latents,"(B=1,ch=4,H/8=128,W/8=128)","[1,4,128,128]","randn * scheduler.init_noise_sigma"
+cond,6,added_cond_kwargs,"H=1024,W=1024","resolution:[2,2], aspect_ratio:[2,1]","sample_size==128 only"
+sched,7,retrieve_timesteps,"num_steps=T","[T]","DPMSolverMultistep (T in {5,10,15,20})"
+loop,8,CFG_latent_concat,"[1,4,128,128]","[2,4,128,128]",per step
+loop,9,scheduler.scale_model_input,"[2,4,128,128]","[2,4,128,128]",per-step scaling
+loop,10,timestep.expand,"[]","[2]",long
+dit.in,11,"pos_embed.Conv2d(4,1152,k=2,s=2)","[2,4,128,128]","[2,1152,64,64]",patch_size=2
+dit.in,12,flatten+transpose,"[2,1152,64,64]","[2,4096,1152]","N=64*64=4096 tokens"
+dit.in,13,pos_embed.sinusoidal_2D,"[2,4096,1152]","[2,4096,1152]",interpolation_scale=2
+dit.in,14,adaln_single(timestep+res+ar),"t:[2]+res+ar","timestep:[2,6912], embedded:[2,1152]","6*1152 scale/shift vector"
+dit.in,15,"caption_projection.Linear1(4096->1152)","[2,120,4096]","[2,120,1152]",+GELU
+dit.in,16,"caption_projection.Linear2(1152->1152)","[2,120,1152]","[2,120,1152]",cross-attn KV source
+dit.block,17,"for i in range(28): BasicTransformerBlock","[2,4096,1152]","[2,4096,1152]","28 blocks (per-block ~20.2M params)"
+dit.block.a,17a,adaLN split(6),"scale_shift_table+timestep","shift1/scale1/gate1/shift2/scale2/gate2",per-block
+dit.block.a,17b,LayerNorm1+modulate,"[2,4096,1152]","[2,4096,1152]","x*(1+scale1)+shift1"
+dit.block.a,17c,"attn1.to_q/k/v","[2,4096,1152]","Q/K/V:[2,16,4096,72]","Linear(1152,1152) bias=True x3"
+dit.block.a,17d,self-attn QK^T,"Q/K:[2,16,4096,72]","logits:[2,16,4096,4096]",SDPA
+dit.block.a,17e,self-attn softmax*V,"logits+V:[2,16,4096,72]","[2,16,4096,72]",
+dit.block.a,17f,attn1.to_out.Linear,"[2,4096,1152]","[2,4096,1152]","Linear(1152,1152)"
+dit.block.a,17g,residual+gate1,"x+gate1*h","[2,4096,1152]",gated residual
+dit.block.c,17h,LayerNorm2,"[2,4096,1152]","[2,4096,1152]",no modulation
+dit.block.c,17i,attn2.to_q,"[2,4096,1152]","Q:[2,16,4096,72]","Linear(1152,1152)"
+dit.block.c,17j,attn2.to_k/v,"[2,120,1152]","K/V:[2,16,120,72]","Linear(1152,1152) x2"
+dit.block.c,17k,cross-attn QK^T,"Q/K:[2,16,4096,72]","logits:[2,16,4096,120]",+encoder_attention_mask bias
+dit.block.c,17l,cross-attn softmax*V,"logits+V:[2,16,120,72]","[2,16,4096,72]",
+dit.block.c,17m,attn2.to_out.Linear,"[2,4096,1152]","[2,4096,1152]","Linear(1152,1152)"
+dit.block.c,17n,residual_cross,"x+h","[2,4096,1152]",no gate
+dit.block.f,17o,LayerNorm3+modulate,"[2,4096,1152]","[2,4096,1152]","x*(1+scale2)+shift2"
+dit.block.f,17p,"ff.net.0.proj(1152->4608)","[2,4096,1152]","[2,4096,4608]",GELU-approx
+dit.block.f,17q,"ff.net.2(4608->1152)","[2,4096,4608]","[2,4096,1152]",
+dit.block.f,17r,residual+gate2,"x+gate2*h","[2,4096,1152]",end of block
+dit.out,18,scale_shift_table+embedded_timestep.chunk2,"[2,1152]","shift/scale:[2,1,1152]",
+dit.out,19,norm_out(LayerNorm affine=False),"[2,4096,1152]","[2,4096,1152]",
+dit.out,20,modulate,"[2,4096,1152]","[2,4096,1152]","x*(1+scale)+shift"
+dit.out,21,"proj_out.Linear(1152->32)","[2,4096,1152]","[2,4096,32]","32 = patch^2 * out_channels = 4*8"
+dit.out,22,reshape,"[2,4096,32]","[2,64,64,2,2,8]",
+dit.out,23,"einsum nhwpqc->nchpwq (unpatchify)","[2,64,64,2,2,8]","[2,8,128,128]",
+cfg,24,chunk(2)+CFG_guidance,"[2,8,128,128]","[1,8,128,128]","uncond + 4.5*(text-uncond)"
+cfg,25,learned-sigma split,"[1,8,128,128]","[1,4,128,128]","chunk(2,dim=1)[0] (eps only)"
+sched,26,scheduler.step,"noise_pred+t+latents","latents:[1,4,128,128]",DPM-Solver update
+loop,27,repeat steps 8-26,"","",T times total
+vae,28,latents / 0.18215,"[1,4,128,128]","[1,4,128,128]",scaling_factor
+vae,29,vae.decode(AutoencoderKL),"[1,4,128,128]","[1,3,1024,1024]","8x upsample, blocks=[128,256,512,512] (~84M)"
+post,30,image_processor.postprocess,"[1,3,1024,1024]",PIL.Image,denormalize + resize
+output,31,PIL.Image,-,1024x1024 RGB,final

@@ -45,22 +45,23 @@ from accelerate import Accelerator
 from diffusers import PixArtAlphaPipeline, DPMSolverMultistepScheduler
 from transformers import CLIPModel, CLIPProcessor
 
-from deepcache_utils import install_deepcache
+from deepcache_utils import install_deepcache, calibrate_cache_lora
 from eval_utils import get_prompts, generate_and_evaluate
 from quant_methods import (
     apply_rtn_quantization,
     apply_svdquant_quantization,
     apply_mrgptq_quantization,
     apply_fouroversix_quantization,
+    apply_fp4dit_quantization,
+    apply_hqdit_quantization,
+    apply_sixbit_quantization,
 )
 
 
 # ---------------------------------------------------------------------------
 # DeepCache 기본 설정 (기존 실험에서 검증된 최적 설정)
 # ---------------------------------------------------------------------------
-DEEPCACHE_INTERVAL = 2
-DEEPCACHE_START    = 8
-DEEPCACHE_END      = 20
+DEEPCACHE_INTERVAL   = 2
 DEEPCACHE_FULL_STEPS = {0}   # 첫 step은 항상 full
 
 
@@ -75,14 +76,19 @@ def main():
 
     # ── 실험 선택 ──────────────────────────────────────────────────────────────
     parser.add_argument("--quant_method", type=str, required=True,
-                        choices=["RTN", "SVDQUANT", "MRGPTQ", "FOUROVERSIX"],
+                        choices=["RTN", "SVDQUANT", "MRGPTQ", "FOUROVERSIX",
+                                 "FP4DIT", "HQDIT", "SIXBIT"],
                         help="양자화 방법 선택")
     parser.add_argument("--cache_mode", type=str, default="none",
-                        choices=["none", "deepcache"],
-                        help="캐시 모드: none (no caching) | deepcache")
+                        choices=["none", "deepcache", "cache_lora"],
+                        help="캐시 모드: none | deepcache | cache_lora (rank-k corrector)")
     parser.add_argument("--num_steps", type=int, default=20,
-                        choices=[15, 20],
+                        choices=[5, 10, 15, 20],
                         help="inference step 수")
+    parser.add_argument("--cache_start", type=int, default=8,
+                        help="DeepCache region start block index (default: 8)")
+    parser.add_argument("--cache_end",   type=int, default=20,
+                        help="DeepCache region end block index exclusive (default: 20)")
 
     # ── 공통 설정 ─────────────────────────────────────────────────────────────
     parser.add_argument("--num_samples", type=int, default=20)
@@ -103,8 +109,17 @@ def main():
                         help="SmoothQuant alpha")
     parser.add_argument("--block_size",    type=int,   default=16,
                         help="NVFP4 group size (default: 16, fixed for all methods)")
+    parser.add_argument("--lora_rank",     type=int,   default=8,
+                        help="Cache-LoRA corrector rank (cache_mode=cache_lora only)")
+    parser.add_argument("--lora_calib",    type=int,   default=4,
+                        help="Cache-LoRA calibration sample count")
+    parser.add_argument("--calib_seed_offset", type=int, default=1000,
+                        help="Seed base for calibration (must not overlap with eval seeds 42+i)")
     args = parser.parse_args()
     args.block_size = 16  # NVFP4 group size, fixed for all methods
+
+    cache_start = args.cache_start
+    cache_end   = args.cache_end
 
     accelerator = Accelerator()
     device = accelerator.device
@@ -116,7 +131,13 @@ def main():
     t_count = args.num_steps
 
     # 결과 디렉토리
-    run_tag     = f"{args.quant_method}_{args.cache_mode}_steps{t_count}"
+    cache_tag = (f"cache_lora_r{args.lora_rank}"
+                 if args.cache_mode == "cache_lora"
+                 else args.cache_mode)
+    if args.cache_mode == "none":
+        run_tag = f"{args.quant_method}_{cache_tag}_steps{t_count}"
+    else:
+        run_tag = f"{args.quant_method}_{cache_tag}_c{cache_start}-{cache_end}_steps{t_count}"
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
     dataset_save_dir = os.path.join(args.save_dir, args.dataset_name, run_tag)
 
@@ -189,29 +210,82 @@ def main():
             pipe, transformer, accelerator, prompts, p_count, t_count, device, args
         )
 
+    elif args.quant_method == "FP4DIT":
+        apply_fp4dit_quantization(
+            pipe, transformer, accelerator, prompts, p_count, t_count, device, args
+        )
+
+    elif args.quant_method == "HQDIT":
+        apply_hqdit_quantization(
+            pipe, transformer, accelerator, prompts, p_count, t_count, device, args
+        )
+
+    elif args.quant_method == "SIXBIT":
+        apply_sixbit_quantization(
+            pipe, transformer, accelerator, prompts, p_count, t_count, device, args
+        )
+
     accelerator.wait_for_everyone()
 
     # -----------------------------------------------------------------------
-    # Phase 3: DeepCache 설치 (cache_mode == "deepcache")
+    # Phase 2.5: Cache-LoRA calibration (cache_mode == "cache_lora")
+    # -----------------------------------------------------------------------
+    corrector_A = corrector_B = None
+    calib_time_sec = None
+
+    if args.cache_mode == "cache_lora":
+        n_calib = 2 if args.test_run else args.lora_calib
+        accelerator.print(
+            f"\n[Phase 2.5] Cache-LoRA calibration "
+            f"(rank={args.lora_rank}, calib_samples={n_calib}, "
+            f"seed_offset={args.calib_seed_offset})..."
+        )
+        corrector_A, corrector_B, calib_time_sec = calibrate_cache_lora(
+            pipe=pipe,
+            transformer=pipe.transformer,
+            cache_start=cache_start,
+            cache_end=cache_end,
+            cache_interval=DEEPCACHE_INTERVAL,
+            prompts=prompts,
+            num_calib=n_calib,
+            t_count=t_count,
+            guidance_scale=args.guidance_scale,
+            device=device,
+            rank=args.lora_rank,
+            calib_seed_offset=args.calib_seed_offset,
+        )
+        accelerator.print(f"  Calibration time: {calib_time_sec:.1f}s")
+
+    accelerator.wait_for_everyone()
+
+    # -----------------------------------------------------------------------
+    # Phase 3: DeepCache 설치 (cache_mode == "deepcache" or "cache_lora")
     # -----------------------------------------------------------------------
     cache_state = None
 
-    if args.cache_mode == "deepcache":
+    if args.cache_mode in ("deepcache", "cache_lora"):
+        mode_label = f"cache_lora(rank={args.lora_rank})" if args.cache_mode == "cache_lora" else "deepcache"
         accelerator.print(
-            f"\n[Phase 3] Installing DeepCache "
+            f"\n[Phase 3] Installing DeepCache [{mode_label}] "
             f"(interval={DEEPCACHE_INTERVAL}, "
-            f"blocks=[{DEEPCACHE_START},{DEEPCACHE_END}))..."
+            f"blocks=[{cache_start},{cache_end}))..."
         )
         cache_state = install_deepcache(
             pipe.transformer,
-            cache_start=DEEPCACHE_START,
-            cache_end=DEEPCACHE_END,
+            cache_start=cache_start,
+            cache_end=cache_end,
             cache_interval=DEEPCACHE_INTERVAL,
             full_steps_set=DEEPCACHE_FULL_STEPS,
         )
 
+        # Attach Cache-LoRA corrector if calibrated
+        if corrector_A is not None:
+            cache_state.corrector_A = corrector_A
+            cache_state.corrector_B = corrector_B
+            accelerator.print(f"  Cache-LoRA corrector attached (rank={args.lora_rank})")
+
         # speedup 추정
-        n_deep   = DEEPCACHE_END - DEEPCACHE_START
+        n_deep   = cache_end - cache_start
         n_total  = len(pipe.transformer.transformer_blocks)
         n_always = n_total - n_deep
         avg_blocks = (n_total + n_always * (DEEPCACHE_INTERVAL - 1)) / DEEPCACHE_INTERVAL
@@ -255,16 +329,19 @@ def main():
     # 결과 저장
     # -----------------------------------------------------------------------
     if accelerator.is_main_process:
+        use_cache = args.cache_mode in ("deepcache", "cache_lora")
         result = {
             "quant_method":    args.quant_method,
             "cache_mode":      args.cache_mode,
+            "lora_rank":       args.lora_rank if args.cache_mode == "cache_lora" else None,
             "num_steps":       t_count,
             "num_samples":     s_count,
             "lowrank":         args.lowrank,
             "speedup_est":     round(speedup_est, 3),
-            "deepcache_start": DEEPCACHE_START if args.cache_mode == "deepcache" else None,
-            "deepcache_end":   DEEPCACHE_END   if args.cache_mode == "deepcache" else None,
-            "deepcache_interval": DEEPCACHE_INTERVAL if args.cache_mode == "deepcache" else None,
+            "deepcache_start": cache_start if use_cache else None,
+            "deepcache_end":   cache_end   if use_cache else None,
+            "deepcache_interval": DEEPCACHE_INTERVAL if use_cache else None,
+            "calib_time_sec":     round(calib_time_sec, 2) if calib_time_sec is not None else None,
             **metrics,
         }
 
@@ -277,7 +354,7 @@ def main():
         csv_path = os.path.join(dataset_save_dir, "metrics.csv")
         csv_fields = ["quant_method", "cache_mode", "num_steps", "speedup_est",
                       "fid", "is", "psnr", "ssim", "lpips", "clip",
-                      "time_per_image_sec"]
+                      "time_per_image_sec", "calib_time_sec"]
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
             writer.writeheader()
@@ -294,6 +371,8 @@ def main():
             print(f"  CLIP         : {metrics['clip']:.2f}")
         print(f"  Time/img     : {metrics['time_per_image_sec']:.2f}s")
         print(f"  Speedup est  : {speedup_est:.2f}x")
+        if calib_time_sec is not None:
+            print(f"  Calib time   : {calib_time_sec:.1f}s")
         print(f"  Saved to     : {dataset_save_dir}")
         print(f"{'='*65}\n")
 

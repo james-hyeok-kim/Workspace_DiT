@@ -75,8 +75,10 @@ def main():
     device = accelerator.device
 
     # ── 저장 경로 결정 ────────────────────────────────────────────────────────
+    # 구조: {out_dir}/{precision}_steps{N}/{dataset_name}/ref_*.png
+    # pixart_deepcache_experiment.py 의 {ref_dir}/{dataset_name}/ 규약과 일치
     tag = f"{args.precision}_steps{args.num_inference_steps}"
-    save_dir = os.path.join(args.out_dir, tag)
+    save_dir = os.path.join(args.out_dir, tag, args.dataset_name)
     if accelerator.is_main_process:
         os.makedirs(save_dir, exist_ok=True)
         accelerator.print(f"Saving to: {save_dir}")
@@ -97,6 +99,7 @@ def main():
 
     if existing == s_count:
         accelerator.print("All images already exist. Nothing to generate.")
+        accelerator.wait_for_everyone()
         return
 
     # ── 모델 로드 ─────────────────────────────────────────────────────────────
