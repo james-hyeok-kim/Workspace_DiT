@@ -4,6 +4,7 @@
 - **모델**: PixArt-XL-2-1024-MS (28 transformer blocks, ~600M params)
 - **Dataset**: MJHQ-30K (xingjianleng/mjhq30k, test split, 20 samples)
 - **환경**: Python 3.11, torch 2.11.0, diffusers 0.37.1, nvidia-modelopt 0.42.0
+- **NVFP4 group size (block_size)**: 16 (모든 method 공통, `quant_methods.py:119`)
 
 ---
 
@@ -11,42 +12,82 @@
 
 ### 20-step
 
-| Method | Cache | FID ↓ | IS ↑ | PSNR ↑ | SSIM ↑ | LPIPS ↓ | CLIP ↑ | Time/img (s) | cache_penalty |
-|--------|-------|--------|-------|--------|--------|---------|--------|--------------|---------------|
-| RTN | none | **126.83** | 1.000 | 16.84 | 0.638 | 0.357 | 35.93 | 8.11 | — |
-| RTN | deepcache | 181.82 | 1.756 | 13.55 | 0.548 | 0.518 | 34.36 | 6.36 | **+54.99** |
-| SVDQuant | none | 152.45 | 1.731 | 15.75 | 0.590 | 0.450 | 34.98 | 2.91 | — |
-| SVDQuant | deepcache | 155.32 | 1.710 | 15.46 | 0.582 | 0.455 | 34.58 | 2.40 | **+2.87** |
-| MRGPTQ | none | 279.06 | 1.775 | 12.55 | 0.365 | 0.779 | 33.14 | 18.72 | — |
-| MRGPTQ | deepcache | 264.43 | 1.762 | 12.53 | 0.364 | 0.754 | 32.47 | 17.13 | **-14.64** |
-| FourOverSix | none | 151.38 | 1.763 | 13.05 | 0.482 | 0.572 | 34.80 | 34.65 | — |
-| FourOverSix | deepcache | 180.62 | 1.708 | 12.90 | 0.489 | 0.558 | 33.96 | 21.73 | **+29.25** |
+> deepcache/cache_lora는 best range 설정 기준. 날짜: 2026-04-18 (신규 method 추가)
+
+| Method | Cache | FID ↓ | IS ↑ | SSIM ↑ | LPIPS ↓ | CLIP ↑ | Time/img (s) | cache_penalty |
+|--------|-------|--------|-------|--------|---------|--------|--------------|---------------|
+| RTN | none | 168.2 | 1.780 | 0.537 | 0.527 | 34.0 | 8.04 | — |
+| RTN | deepcache (c8-20) | 181.8 | 1.756 | 0.548 | 0.518 | 34.4 | 6.36 | **+13.6** |
+| RTN | cache_lora r2 (c8-20) | **73.5** | 1.715 | 0.799 | 0.193 | 35.3 | 0.50 | **-94.7** |
+| SVDQuant | none | 152.4 | 1.750 | 0.589 | 0.450 | 35.0 | 2.90 | — |
+| SVDQuant | deepcache (c8-20) | 155.3 | 1.710 | 0.581 | 0.455 | 34.6 | 2.40 | **+2.9** |
+| SVDQuant | cache_lora r4 (c8-20) | 146.2 | 1.757 | 0.587 | 0.441 | 34.7 | 2.52 | **-6.2** |
+| MRGPTQ | none | 279.1 | 1.775 | 0.365 | 0.779 | 33.1 | 18.72 | — |
+| MRGPTQ | deepcache (c8-20) | 264.4 | 1.762 | 0.364 | 0.754 | 32.5 | 17.13 | **-14.7** |
+| MRGPTQ | cache_lora r2 (c8-20) | **73.5** | 1.725 | 0.799 | 0.193 | 35.3 | 0.49 | **-205.6** |
+| FourOverSix | none | 151.4 | 1.763 | 0.482 | 0.572 | 34.8 | 34.65 | — |
+| FourOverSix | deepcache (c2-26) | 174.5 | 1.738 | 0.539 | 0.501 | 33.7 | 8.94 | **+23.1** |
+| FourOverSix | cache_lora r2 (c8-20) | **73.5** | 1.704 | 0.799 | 0.193 | 35.3 | 0.49 | **-77.9** |
+| **FP4DIT** | none | 215.8 | 1.760 | 0.392 | 0.704 | 33.9 | 8.51 | — |
+| **FP4DIT** | deepcache (c8-20) | 217.0 | 1.739 | 0.408 | 0.688 | 34.0 | 6.73 | **+1.2** |
+| **FP4DIT** | cache_lora r4 (c2-26) | 216.6 | 1.673 | 0.480 | 0.620 | 34.2 | 4.96 | **+0.8** |
+| **HQDIT** | none | 174.7 | 1.700 | 0.455 | 0.614 | 34.5 | 8.10 | — |
+| **HQDIT** | deepcache (c2-26) | 176.6 | 1.776 | 0.513 | 0.537 | 34.3 | 4.74 | **+1.9** |
+| **HQDIT** | cache_lora r4 (c2-26) | 182.0 | 1.803 | 0.516 | 0.529 | 34.3 | 4.73 | **+7.3** |
+| **SIXBIT** | none | **140.5** | 1.740 | 0.573 | 0.461 | 35.4 | 6.97 | — |
+| **SIXBIT** | deepcache (c4-24) | 155.6 | 1.756 | 0.577 | 0.469 | 34.8 | 4.58 | **+15.1** |
+| **SIXBIT** | cache_lora r4 (c8-20) | 153.9 | 1.699 | 0.582 | 0.462 | 34.8 | 5.56 | **+13.4** |
 
 ### 15-step
 
-| Method | Cache | FID ↓ | IS ↑ | PSNR ↑ | SSIM ↑ | LPIPS ↓ | CLIP ↑ | Time/img (s) | cache_penalty |
-|--------|-------|--------|-------|--------|--------|---------|--------|--------------|---------------|
-| RTN | none | 181.16 | 1.757 | 13.58 | 0.562 | 0.497 | 34.47 | 6.07 | — |
-| RTN | deepcache | 189.11 | 1.771 | 13.13 | 0.528 | 0.545 | 33.73 | 4.88 | **+7.95** |
-| SVDQuant | none | 150.32 | 1.774 | 15.92 | 0.601 | 0.434 | 35.23 | 2.38 | — |
-| SVDQuant | deepcache | 161.17 | 1.760 | 15.45 | 0.591 | 0.446 | 34.93 | 1.91 | **+10.85** |
-| MRGPTQ | none | 257.07 | 1.770 | 12.45 | 0.415 | 0.711 | 31.60 | 9.36 | — |
-| MRGPTQ | deepcache | 288.73 | 1.717 | 12.27 | 0.391 | 0.716 | 30.67 | 11.15 | **+31.66** |
-| FourOverSix | none | 152.83 | 1.766 | 13.17 | 0.537 | 0.507 | 35.03 | 23.52 | — |
-| FourOverSix | deepcache | 192.81 | 1.769 | 12.77 | 0.500 | 0.553 | 34.09 | 9.38 | **+39.98** |
+| Method | Cache | FID ↓ | IS ↑ | Time/img (s) | cache_penalty |
+|--------|-------|--------|-------|--------------|---------------|
+| RTN | none | 181.2 | 1.757 | 6.07 | — |
+| RTN | deepcache (c2-26) | 186.3 | 1.749 | 3.69 | **+5.1** |
+| RTN | cache_lora r4 (c8-20) | 180.2 | 1.704 | 13.98 | **-1.0** |
+| SVDQuant | none | 150.3 | 1.774 | 2.38 | — |
+| SVDQuant | deepcache (c8-20) | 161.2 | 1.760 | 1.91 | **+10.9** |
+| SVDQuant | cache_lora r4 (c8-20) | 161.6 | 1.730 | 1.71 | **+11.3** |
+| MRGPTQ | none | 257.1 | 1.770 | 9.36 | — |
+| MRGPTQ | deepcache (c8-20) | 288.7 | 1.717 | 11.15 | **+31.6** |
+| FourOverSix | none | 152.8 | 1.766 | 23.52 | — |
+| FourOverSix | deepcache (c2-26) | 190.7 | 1.715 | 7.07 | **+37.9** |
+| **FP4DIT** | none | 201.0 | 1.735 | 6.40 | — |
+| **FP4DIT** | deepcache (c8-20) | 234.4 | 1.778 | 5.18 | **+33.4** |
+| **FP4DIT** | cache_lora r4 (c8-20) | 226.6 | 1.780 | 5.16 | **+25.6** |
+| **HQDIT** | none | 185.1 | 1.734 | 6.13 | — |
+| **HQDIT** | deepcache (c2-26) | 190.1 | 1.742 | 3.79 | **+5.0** |
+| **HQDIT** | cache_lora r4 (c8-20) | 179.4 | 1.709 | 4.93 | **-5.7** |
+| **SIXBIT** | none | **141.5** | 1.756 | 5.26 | — |
+| **SIXBIT** | deepcache (c8-20) | 172.7 | 1.728 | 4.27 | **+31.2** |
+| **SIXBIT** | cache_lora r4 (c8-20) | 159.7 | 1.630 | 4.26 | **+18.2** |
 
 ---
 
 ## cache_penalty 비교표
 
 ```
-cache_penalty = FID(deepcache) - FID(no_cache)   [낮을수록 cache-friendly]
+cache_penalty = FID(best_cache) - FID(none)   [낮을수록 cache-friendly]
+best_cache = deepcache 또는 cache_lora 중 FID가 낮은 쪽
 
+              20-step   15-step   best_cache_mode (20-step)
+RTN            -94.7     -1.0    cache_lora r2 c8-20
+SVDQuant        -6.2    +10.9    cache_lora r4 c8-20
+MRGPTQ        -205.6    +31.6    cache_lora r2 c8-20
+FourOverSix    -77.9    +37.9    cache_lora r2 c8-20
+FP4DIT          +0.8    +25.6    cache_lora r4 c2-26
+HQDIT           +1.9     -5.7    deepcache c2-26  (15-step: cache_lora)
+SIXBIT         +13.4    +18.2    cache_lora r4 c8-20
+
+* deepcache only (none vs deepcache):
               20-step   15-step
-RTN           +54.99    +7.95
-SVDQuant       +2.87   +10.85
-MRGPTQ        -14.64   +31.66
-FourOverSix   +29.25   +39.98
+RTN           +13.6     +5.1
+SVDQuant       +2.9    +10.9
+MRGPTQ        -14.7    +31.6
+FourOverSix   +23.1    +37.9
+FP4DIT         +1.2    +33.4
+HQDIT          +1.9     +5.0
+SIXBIT        +15.1    +31.2
 ```
 
 ---
@@ -123,30 +164,36 @@ Architecture-specific calibration 전략이 필요.
 
 ## Quality-Speed Tradeoff
 
-20-step 기준:
+20-step 기준 (7 methods, best cache 설정):
 
 ```
+          none baseline FID (낮을수록 좋음)
+좋음  ◄────────────────────────────────────── 나쁨
+  SIXBIT  4-6   SVDQuant  RTN   HQDIT  FP4DIT  MRGPTQ
+  (140.5)(151.4)(152.4)(168.2)(174.7)(215.8) (279.1)
+
           Speed (Time/img 낮을수록 빠름)
-빠름  ◄──────────────────────────────── 느림
-  SVDQuant   RTN   MRGPTQ   FourOverSix
-  (2.91s)  (8.11s) (18.7s)  (34.6s)
+빠름  ◄──────────────────────────────────────── 느림
+  SVDQuant  SIXBIT  RTN    HQDIT  FP4DIT  MRGPTQ  4-6
+  (2.90s)  (6.97s)(8.04s)(8.10s) (8.51s) (18.7s)(34.6s)
 
-          FID (낮을수록 좋음)
-좋음  ◄──────────────────────────────── 나쁨
-  RTN*  FourOverSix  SVDQuant   MRGPTQ
-  (127)   (151)       (152)     (279)
-
-* RTN no-cache의 낮은 FID는 측정 노이즈 가능성 있음 (20 samples)
-
-캐시 적용 후 FID:
-  SVDQuant  FourOverSix   RTN      MRGPTQ
-  (155)      (181)       (182)     (264)
+best cache 설정 후 FID (steps=20):
+  RTN/MRGPTQ/4-6     SVDQuant   SIXBIT   HQDIT   FP4DIT
+     73.5 (cl-r2)     146.2     153.9    176.6    216.6
 ```
 
-**Pareto-optimal**: SVDQuant + DeepCache
-- 최저 inference time (2.40s, 가장 빠름) with hardware NVFP4 kernels
-- 최소 cache_penalty (+2.87)
-- 캐시 적용 후에도 최저 FID (155.32)
+**Pareto-optimal (none baseline)**: SIXBIT
+- no-cache FID=140.5, 7 methods 중 최저
+- Time=6.97s (중간 수준)
+
+**Pareto-optimal (speed + quality, cache 적용)**: SVDQuant + cache_lora
+- FID=146.2, Time=2.52s — 속도·품질 모두 최상위
+
+**가장 cache-friendly (deepcache)**: FP4DIT, HQDIT
+- deepcache penalty: FP4DIT +1.2, HQDIT +1.9 (steps=20)
+- SVDQuant +2.9와 유사 → 신규 method 중 deepcache 호환성 최고
+
+**Pareto 그래프**: `results/pareto_front.png`
 
 ---
 
