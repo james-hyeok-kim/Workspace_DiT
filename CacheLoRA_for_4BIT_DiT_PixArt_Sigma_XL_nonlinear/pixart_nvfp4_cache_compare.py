@@ -54,6 +54,7 @@ from deepcache_utils import (
     calibrate_cache_lora_svdaware,
     calibrate_cache_lora_teacherforced,
 )
+from nonlinear_corrector import calibrate_nonlinear_corrector
 from eval_utils import get_prompts, generate_and_evaluate
 from quant_methods import (
     apply_rtn_quantization,
@@ -89,10 +90,12 @@ def main():
                         choices=["none", "deepcache", "cache_lora",
                                  "cache_lora_phase", "cache_lora_ts",
                                  "cache_lora_block", "cache_lora_svd",
-                                 "cache_lora_tf"],
-                        help="캐시 모드: none | deepcache | cache_lora | "
-                             "cache_lora_phase | cache_lora_ts | "
-                             "cache_lora_block | cache_lora_svd | cache_lora_tf")
+                                 "cache_lora_tf",
+                                 "cache_nl_gelu", "cache_nl_mlp",
+                                 "cache_nl_res", "cache_nl_film"],
+                        help="캐시 모드")
+    parser.add_argument("--nl_mid_dim", type=int, default=32,
+                        help="Nonlinear corrector mid dimension (options 2-4)")
     parser.add_argument("--num_steps", type=int, default=20,
                         choices=[5, 10, 15, 20],
                         help="inference step 수")
@@ -151,8 +154,11 @@ def main():
 
     # 결과 디렉토리
     calib_tag = f"_cal{args.lora_calib}" if args.lora_calib != 4 else ""
-    if "cache_lora" in args.cache_mode:
-        mode_short = args.cache_mode.replace("cache_lora", "cl")   # cl, cl_phase, cl_ts, cl_block, cl_svd
+    if "cache_nl" in args.cache_mode:
+        nl_type = args.cache_mode.replace("cache_nl_", "")
+        cache_tag = f"nl_{nl_type}_r{args.lora_rank}_m{args.nl_mid_dim}{calib_tag}"
+    elif "cache_lora" in args.cache_mode:
+        mode_short = args.cache_mode.replace("cache_lora", "cl")
         cache_tag  = f"{mode_short}_r{args.lora_rank}{calib_tag}"
     else:
         cache_tag = args.cache_mode
@@ -267,9 +273,36 @@ def main():
     step_scales = None
     block_correctors = None
     svd_corrector_A = svd_corrector_B = None
+    nl_corrector = None
     calib_time_sec = None
 
-    if "cache_lora" in args.cache_mode:
+    if "cache_nl" in args.cache_mode:
+        n_calib = 2 if args.test_run else args.lora_calib
+        nl_type = args.cache_mode.replace("cache_nl_", "")  # gelu/mlp/res/film
+        accelerator.print(
+            f"\n[Phase 2.5] Nonlinear corrector calibration "
+            f"(type={nl_type}, rank={args.lora_rank}, mid={args.nl_mid_dim}, "
+            f"calib_samples={n_calib})..."
+        )
+        nl_corrector, calib_time_sec = calibrate_nonlinear_corrector(
+            pipe=pipe,
+            transformer=pipe.transformer,
+            cache_start=cache_start,
+            cache_end=cache_end,
+            cache_interval=args.deepcache_interval,
+            prompts=prompts,
+            num_calib=n_calib,
+            t_count=t_count,
+            guidance_scale=args.guidance_scale,
+            device=device,
+            corrector_type=nl_type,
+            rank=args.lora_rank,
+            mid_dim=args.nl_mid_dim,
+            calib_seed_offset=args.calib_seed_offset,
+        )
+        accelerator.print(f"  Calibration time: {calib_time_sec:.1f}s")
+
+    elif "cache_lora" in args.cache_mode:
         n_calib = 2 if args.test_run else args.lora_calib
         accelerator.print(
             f"\n[Phase 2.5] Cache-LoRA calibration "
@@ -324,7 +357,9 @@ def main():
 
     _cache_modes_with_dc = ("deepcache", "cache_lora", "cache_lora_phase",
                              "cache_lora_ts", "cache_lora_block", "cache_lora_svd",
-                             "cache_lora_tf")
+                             "cache_lora_tf",
+                             "cache_nl_gelu", "cache_nl_mlp",
+                             "cache_nl_res", "cache_nl_film")
     if args.cache_mode in _cache_modes_with_dc:
         accelerator.print(
             f"\n[Phase 3] Installing DeepCache [{args.cache_mode}] "
@@ -340,7 +375,14 @@ def main():
         )
 
         # Attach correctors based on mode
-        if phase_correctors is not None:
+        if nl_corrector is not None:
+            cache_state.nl_corrector = nl_corrector
+            cache_state.nl_needs_t = (args.cache_mode == "cache_nl_film")
+            cache_state.nl_t_count = t_count
+            n_params = sum(p.numel() for p in nl_corrector.parameters())
+            accelerator.print(f"  Nonlinear corrector attached "
+                              f"(type={args.cache_mode.replace('cache_nl_','')}, params={n_params:,})")
+        elif phase_correctors is not None:
             cache_state.phase_correctors = phase_correctors
             cache_state.phase_t_count    = phase_t_count
             accelerator.print(f"  Phase-binned corrector attached ({len(phase_correctors)} phases, rank={args.lora_rank})")

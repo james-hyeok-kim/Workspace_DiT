@@ -125,3 +125,77 @@ SIXBIT           +8.4     +9.0    +33.9    +48.3  cache_lora r4 c8-20
 | 5 | HQDIT | 8.30 |
 | 6 | FP4DIT | 8.54 |
 
+---
+
+## SVDQUANT Ablation 실험 (추가)
+
+> **목적**: SVDQUANT에서 Cache-LoRA 효과가 없는 원인 규명
+> **설정**: range=[8,20) 고정, steps={10,15,20}, 20 samples (빠른 탐색)
+> **CSV**: `results/svdquant_ablation_results.csv`
+
+### 기준선 (baseline, 100 samples)
+
+| Cache | Interval | Rank | Steps | FID ↓ | IS ↑ | Time (s) |
+|-------|----------|------|-------|--------|------|----------|
+| none | — | — | 10 | **121.9** | **5.641** | 1.44 |
+| none | — | — | 20 | 215.4 | 1.000* | 3.01 |
+| deepcache | 2 | — | 10 | 140.5 | 5.408 | 1.18 |
+| deepcache | 2 | — | 15 | 130.2 | 5.627 | 1.92 |
+| deepcache | 2 | — | 20 | 129.1 | 5.657 | 2.33 |
+| cache_lora | 2 | 4 | 15 | 136.6 | 5.397 | 1.78 |
+| cache_lora | 2 | 4 | 20 | 126.6 | 5.364 | 2.22 |
+
+*IS=1.000: W4A4 activation 누적 오차로 IS 붕괴
+
+### Axis 1: deepcache_interval 증가 (20 samples)
+
+| Cache | Interval | Steps | FID ↓ | IS ↑ | 판정 |
+|-------|----------|-------|--------|------|------|
+| deepcache | **3** | 10 | 236.2 | 1.629 | ❌ IS 붕괴 |
+| deepcache | **3** | 15 | 194.1 | 1.718 | ❌ |
+| deepcache | **3** | 20 | 164.8 | 1.729 | ❌ |
+| deepcache | **4** | 10 | 281.8 | 1.712 | ❌ |
+| deepcache | **4** | 15 | 223.3 | 1.755 | ❌ |
+| deepcache | **4** | 20 | 188.9 | 1.708 | ❌ |
+| cache_lora | **3** | 20 | 197.8 | 1.780 | ❌ |
+| cache_lora | **4** | 20 | 291.4 | 1.710 | ❌ |
+
+**결론**: interval=2가 임계점. s20 기준 interval=2 → 10 full steps, interval=3 → 7 full steps로 줄어들면서 activation 누적 오차가 임계치를 초과 → IS 전면 붕괴. **interval 증가는 효과 없음.**
+
+### Axis 2: Cache-LoRA rank 증가 (20 samples)
+
+| Rank | Steps | FID ↓ | IS ↑ | 판정 |
+|------|-------|--------|------|------|
+| 4 (baseline) | 20 | 126.6 | 5.364 | ✅ |
+| **8** | 10 | 276.7 | 1.692 | ❌ IS 붕괴 |
+| **8** | 15 | 180.2 | 1.775 | ❌ |
+| **8** | 20 | 158.9 | 1.799 | ❌ |
+| **16** | 15 | 172.3 | 1.779 | ❌ |
+| **16** | 20 | 161.0 | 1.798 | ❌ |
+| **32** | 15 | 161.1 | 1.747 | ❌ |
+| **32** | 20 | 165.4 | 1.789 | ❌ |
+
+**결론**: rank 증가 시 오히려 악화. 원인은 **calib=4 samples로 rank=8~32 corrector 학습 → 심각한 overfitting**. rank=4만 4-sample calibration에서 안정적 (4 samples = 4 singular vectors로 정확히 fitting). rank를 늘리려면 calib 샘플 수도 함께 늘려야 함 (미검증).
+
+### Axis 3: SVDQUANT_NOLR — 내부 LR 제거 (20 samples)
+
+| Method | Cache | Steps | FID ↓ | IS ↑ | SSIM |
+|--------|-------|-------|--------|------|------|
+| SVDQUANT_NOLR | none | 10 | 641.4 | 1.000 | 0.017 |
+| SVDQUANT_NOLR | none | 15 | 656.6 | 1.000 | 0.019 |
+| SVDQUANT_NOLR | none | 20 | 660.5 | 1.000 | 0.021 |
+| SVDQUANT_NOLR | deepcache | 10 | 641.4 | 1.000 | 0.017 |
+| SVDQUANT_NOLR | cache_lora | 10 | 641.4 | 1.000 | 0.017 |
+
+**결론**: 모든 캐싱 방법에서 동일하게 완전 붕괴 (SSIM=0.017 ≈ noise). SVDQUANT 양자화 시 `W_q = FP4(W − LR)` 구조로 저장되므로, LR 제거 시 inference에서 `(W − LR) @ x`가 계산되어 전 레이어에 systematic negative bias 발생. **LR correction은 구조적으로 제거 불가능.**
+
+### 종합 결론
+
+| 가설 | 결과 |
+|------|------|
+| interval 증가 시 더 공격적 캐싱 가능 | ❌ interval=2가 하한선. 3 이상에서 IS 전면 붕괴 |
+| rank 증가로 internal LR(rank=32)과 매칭 | ❌ calib=4로 overfitting. calib 증가 시 재검토 필요 |
+| LR 제거 후 Cache-LoRA로 간섭 해소 | ❌ NOLR 자체가 모델 파괴 — LR은 필수 구조 |
+
+**SVDQUANT 최적 설정**: `none steps=10` (FID=121.9, IS=5.641, 1.44s/img) — 어떤 캐싱도 이보다 나은 결과 없음.
+

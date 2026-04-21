@@ -7,7 +7,8 @@ import json
 import os
 import csv
 
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results", "MJHQ")
+DATA_ROOT   = "/data/james_dit_pixart_sigma_xl_mjhq"
+RESULTS_DIR = DATA_ROOT  # method별 하위 디렉토리를 glob으로 탐색
 OUT_CSV     = os.path.join(os.path.dirname(__file__), "results", "sweep_all_results.csv")
 
 FIELDS = [
@@ -20,16 +21,21 @@ FIELDS = [
 ]
 
 rows = []
-for tag in sorted(os.listdir(RESULTS_DIR)):
-    metrics_path = os.path.join(RESULTS_DIR, tag, "metrics.json")
-    if not os.path.isfile(metrics_path):
+# /data/james_dit_pixart_sigma_xl_mjhq/{METHOD}/MJHQ/{TAG}/metrics.json
+for method_dir in sorted(os.listdir(DATA_ROOT)):
+    mjhq_dir = os.path.join(DATA_ROOT, method_dir, "MJHQ")
+    if not os.path.isdir(mjhq_dir):
         continue
-    with open(metrics_path) as f:
-        d = json.load(f)
-    row = {"tag": tag}
-    for k in FIELDS[1:]:
-        row[k] = d.get(k, "")
-    rows.append(row)
+    for tag in sorted(os.listdir(mjhq_dir)):
+        metrics_path = os.path.join(mjhq_dir, tag, "metrics.json")
+        if not os.path.isfile(metrics_path):
+            continue
+        with open(metrics_path) as f:
+            d = json.load(f)
+        row = {"tag": tag}
+        for k in FIELDS[1:]:
+            row[k] = d.get(k, "")
+        rows.append(row)
 
 with open(OUT_CSV, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=FIELDS, extrasaction="ignore")

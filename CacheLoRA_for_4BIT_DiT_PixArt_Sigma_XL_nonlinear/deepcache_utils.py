@@ -96,6 +96,11 @@ class DeepCacheState:
         self.svd_corrector_B: torch.Tensor | None = None  # [H, rank]
         self.lr_probe_cached: torch.Tensor | None = None  # [B,T,H] — reset per image
 
+        # Nonlinear corrector (nn.Module, set after calibration)
+        self.nl_corrector = None       # nn.Module with forward(dx, t_norm=None)
+        self.nl_needs_t: bool = False  # True for FiLM (option 4)
+        self.nl_t_count: int | None = None  # total steps for t_norm computation
+
         self._image_idx: int = 0
 
     def reset(self):
@@ -310,6 +315,7 @@ def _make_cached_forward(cache_start: int, cache_end: int,
                 or state.step_scales is not None
                 or state.svd_corrector_A is not None
                 or state.block_correctors is not None
+                or state.nl_corrector is not None
                 or getattr(state, '_tf_calibration_mode', False)
             )
             if needs_h_in:
@@ -367,6 +373,22 @@ def _make_cached_forward(cache_start: int, cache_end: int,
                 state._tf_pairs.append((_stale_dx.float(), _drift.float()))
                 # Apply basic cached residual only (no correction during TF calibration)
                 hidden_states = hidden_states + state.deep_residual_cache
+
+            # ── Nonlinear corrector ──────────────────────────────────────
+            elif state.nl_corrector is not None and state.h_in_cached is not None:
+                dx = hidden_states - state.h_in_cached
+                dtype = hidden_states.dtype
+                with torch.no_grad():
+                    if state.nl_needs_t and state.nl_t_count is not None:
+                        t_val = step_idx / max(state.nl_t_count - 1, 1)
+                        t_norm = torch.full(
+                            (*dx.shape[:-1], 1), t_val,
+                            device=dx.device, dtype=torch.float16,
+                        )
+                        correction = state.nl_corrector(dx.half(), t_norm).to(dtype)
+                    else:
+                        correction = state.nl_corrector(dx.half()).to(dtype)
+                hidden_states = hidden_states + state.deep_residual_cache + correction
 
             # ── Direction 5: Block-specific corrector (global dx, per-block residual) ─
             elif state.block_correctors is not None and state.h_in_cached is not None:
