@@ -2,7 +2,7 @@
 # run_generate_refs.sh
 # PixArt-XL MJHQ reference 이미지 생성
 #
-# 저장 위치: /data/james_dit_pixart_xl_mjhq/{precision}_steps{N}/ref_*.png
+# 저장 위치: /data/jameskimh/james_dit_pixart_xl_mjhq/{precision}_steps{N}/ref_*.png
 # - 이미 존재하는 이미지는 건너뜁니다 (재실행 안전)
 #
 # 생성 대상:
@@ -20,7 +20,7 @@ cd "$SCRIPT_DIR"
 [ -f ~/.env ] && source ~/.env
 
 MODEL_PATH="PixArt-alpha/PixArt-XL-2-1024-MS"
-OUT_DIR="/data/james_dit_pixart_xl_mjhq"
+OUT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 NUM_SAMPLES=1000
 
 PRECISION="${1:-}"

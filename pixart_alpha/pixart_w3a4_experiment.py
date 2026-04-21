@@ -285,7 +285,7 @@ def main():
     parser = argparse.ArgumentParser(description="W3A4 vs FP16 / NVFP4_DEFAULT_CFG Quantization Experiment")
     parser.add_argument("--num_samples",   type=int,   default=20)
     parser.add_argument("--test_run",      action="store_true", help="2샘플로 파이프라인 통과 확인")
-    parser.add_argument("--ref_dir",       type=str,   default="/data/james_dit_ref/ref_images_fp16")
+    parser.add_argument("--ref_dir",       type=str,   default="/data/jameskimh/james_dit_ref/ref_images_fp16")
     parser.add_argument("--save_dir",      type=str,   default="./results/w3a4_experiment/W3A4")
     parser.add_argument("--model_path",    type=str,   default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name",  type=str,   default="MJHQ", choices=["MJHQ", "sDCI"])

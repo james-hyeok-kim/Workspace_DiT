@@ -26,7 +26,7 @@ TEST_MODE=0
 
 # ---- 경로 설정 ----
 BASE_DIR="$(pwd)"
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 RESULT_BASE="${BASE_DIR}/results/w3a4_experiment"
 LOG_DIR="${BASE_DIR}/logs/w3a4_experiment"
 mkdir -p "${RESULT_BASE}" "${LOG_DIR}"

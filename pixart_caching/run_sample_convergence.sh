@@ -37,10 +37,10 @@ mkdir -p "$LOG_DIR" "$CONV_DIR"
 
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 
-# ref 이미지는 /data/james_dit_pixart_xl_mjhq/{precision}_steps{N}/ 사용
+# ref 이미지는 /data/jameskimh/james_dit_pixart_xl_mjhq/{precision}_steps{N}/ 사용
 # 없으면 먼저 bash run_generate_refs.sh 실행
-REF_DIR_20="/data/james_dit_pixart_xl_mjhq/fp16_steps20"
-REF_DIR_15="/data/james_dit_pixart_xl_mjhq/fp16_steps15"
+REF_DIR_20="/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps20"
+REF_DIR_15="/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps15"
 
 for d in "$REF_DIR_20" "$REF_DIR_15"; do
     if [ ! -d "$d" ] || [ "$(ls "$d"/ref_*.png 2>/dev/null | wc -l)" -lt "$N_MAX" ]; then

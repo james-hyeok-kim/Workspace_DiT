@@ -15,7 +15,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHON_SCRIPT="$SCRIPT_DIR/pixart_nvfp4_cache_compare.py"
 ENV_PYTHON="/home/jameskimh/.dit/bin/accelerate"
-DATA_ROOT="/data/james_dit_pixart_sigma_xl_mjhq"
+DATA_ROOT="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq"
 
 NUM_SAMPLES=20
 TEST_RUN=false
@@ -60,9 +60,13 @@ run_one() {
     fi
 
     local RESULT_DIR="$DATA_ROOT/$METHOD/MJHQ/$TAG"
-    if [ -f "$RESULT_DIR/metrics.json" ] && [ "$TEST_RUN" = false ]; then
-        echo "  SKIP: $TAG"
-        return
+    # Baselines (deepcache/cache_lora) always skip if metrics.json exists — avoids overwriting main sweep n=100 data
+    # nl_ modes skip only when not in test_run (so smoke test still exercises them)
+    if [ -f "$RESULT_DIR/metrics.json" ]; then
+        if [[ "$CACHE_MODE" != cache_nl_* ]] || [ "$TEST_RUN" = false ]; then
+            echo "  SKIP: $TAG"
+            return
+        fi
     fi
 
     echo ""

@@ -84,7 +84,7 @@ STEP0_END=$(date +%s)
 # =============================================================================
 # [1] fp16_steps20 ref 생성 (이미 1000장 있으면 스킵)
 # =============================================================================
-REF_DIR=/data/james_dit_pixart_xl_mjhq/fp16_steps20
+REF_DIR=/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps20
 REF_COUNT=$(ls "$REF_DIR/MJHQ"/ref_*.png 2>/dev/null | wc -l || echo 0)
 
 if [ "$REF_COUNT" -ge 1000 ]; then
@@ -97,7 +97,7 @@ else
         --precision fp16 \
         --num_inference_steps 20 \
         --num_samples 1000 \
-        --out_dir /data/james_dit_pixart_xl_mjhq
+        --out_dir /data/jameskimh/james_dit_pixart_xl_mjhq
     notify "✅ [1/5] fp16_steps20 완료! (소요: $(elapsed_since $STEP1_START))"
 fi
 
@@ -210,7 +210,7 @@ SAVE_A="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps20"
 SAVE_B="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps15"
 SAVE_C="$SCRIPT_DIR/results/MJHQ/deepcache/interval2_s8_e20_gs4.5_steps15"
 NS="20,100,250,500,750,1000"
-REF_EVAL=/data/james_dit_pixart_xl_mjhq/fp16_steps20/MJHQ
+REF_EVAL=/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps20/MJHQ
 
 python3 "$SCRIPT_DIR/eval_convergence.py" \
     --sample_dir "$SAVE_A" \

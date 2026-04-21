@@ -110,9 +110,9 @@ def main():
     parser.add_argument("--dataset_name", type=str, default="MJHQ",
                         choices=["MJHQ", "sDCI"])
     parser.add_argument("--ref_dir", type=str,
-                        default="/data/james_dit_pixart_sigma_xl_mjhq/fp16_steps{steps}/MJHQ")
+                        default="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/fp16_steps{steps}/MJHQ")
     parser.add_argument("--save_dir", type=str, default=None,
-                        help="이미지 저장 루트. 미지정 시 /data/james_dit_pixart_sigma_xl_mjhq/{quant_method}")
+                        help="이미지 저장 루트. 미지정 시 /data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{quant_method}")
     parser.add_argument("--guidance_scale", type=float, default=4.5)
 
     # ── 양자화 하이퍼파라미터 ─────────────────────────────────────────────────
@@ -135,7 +135,7 @@ def main():
     args = parser.parse_args()
     args.block_size = 16  # NVFP4 group size, fixed for all methods
     if args.save_dir is None:
-        args.save_dir = f"/data/james_dit_pixart_sigma_xl_mjhq/{args.quant_method}"
+        args.save_dir = f"/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{args.quant_method}"
 
     cache_start = args.cache_start
     cache_end   = args.cache_end

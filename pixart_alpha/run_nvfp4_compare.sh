@@ -17,7 +17,7 @@ MODEL_PATH="PixArt-alpha/PixArt-XL-2-1024-MS"
 DATASET="MJHQ"
 BLOCK_SIZE=128
 LOWRANK=32
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 BASE_DIR="$(pwd)"
 LOG_DIR="${BASE_DIR}/logs/nvfp4_compare"
 mkdir -p "${LOG_DIR}"

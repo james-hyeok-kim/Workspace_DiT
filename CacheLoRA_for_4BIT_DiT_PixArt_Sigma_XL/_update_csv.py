@@ -7,7 +7,7 @@ from pathlib import Path
 from collections import defaultdict
 
 SCRIPT_DIR   = Path(__file__).parent
-RESULTS_ROOT = Path("/data/james_dit_pixart_sigma_xl_mjhq/HQDIT/MJHQ")
+RESULTS_ROOT = Path("/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/HQDIT/MJHQ")
 CSV_PATH     = SCRIPT_DIR / "results" / "sweep_all_results.csv"
 
 with open(CSV_PATH, newline="") as f:

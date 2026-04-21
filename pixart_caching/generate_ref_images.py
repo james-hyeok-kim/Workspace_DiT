@@ -66,7 +66,7 @@ def main():
     parser.add_argument("--guidance_scale",      type=float, default=4.5)
     parser.add_argument("--num_samples",         type=int, default=1000)
     parser.add_argument("--out_dir",             type=str,
-                        default="/data/james_dit_pixart_xl_mjhq",
+                        default="/data/jameskimh/james_dit_pixart_xl_mjhq",
                         help="Root output directory")
     parser.add_argument("--seed",                type=int, default=42)
     args = parser.parse_args()

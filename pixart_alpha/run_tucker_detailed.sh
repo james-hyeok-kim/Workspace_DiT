@@ -25,7 +25,7 @@ fi
 NUM_GPUS=2
 MODEL_PATH="PixArt-alpha/PixArt-XL-2-1024-MS"
 DATASET="MJHQ"
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 BASE_DIR="$(pwd)"
 LOG_DIR="${BASE_DIR}/logs/tucker_detailed"
 RESULT_DIR="${BASE_DIR}/results/tucker_detailed"

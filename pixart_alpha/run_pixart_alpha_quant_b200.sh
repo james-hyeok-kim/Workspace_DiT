@@ -11,7 +11,7 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 
 # 2. 경로 설정
 BASE_DIR="$(pwd)"
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 
 # 3. 테스트 모드 스위치 (1: 테스트, 0: 본 실험)
 TEST_MODE=1

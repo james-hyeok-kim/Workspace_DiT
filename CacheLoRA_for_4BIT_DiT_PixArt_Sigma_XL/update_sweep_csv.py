@@ -7,7 +7,7 @@ import json
 import os
 import csv
 
-DATA_ROOT   = "/data/james_dit_pixart_sigma_xl_mjhq"
+DATA_ROOT   = "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq"
 RESULTS_DIR = DATA_ROOT  # method별 하위 디렉토리를 glob으로 탐색
 OUT_CSV     = os.path.join(os.path.dirname(__file__), "results", "sweep_all_results.csv")
 
@@ -21,7 +21,7 @@ FIELDS = [
 ]
 
 rows = []
-# /data/james_dit_pixart_sigma_xl_mjhq/{METHOD}/MJHQ/{TAG}/metrics.json
+# /data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{METHOD}/MJHQ/{TAG}/metrics.json
 for method_dir in sorted(os.listdir(DATA_ROOT)):
     mjhq_dir = os.path.join(DATA_ROOT, method_dir, "MJHQ")
     if not os.path.isdir(mjhq_dir):

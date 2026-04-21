@@ -36,7 +36,7 @@ run_svdq_calib_rank() {
     local CALIB_TAG=""
     if [ "$CALIB" != "4" ]; then CALIB_TAG="_cal${CALIB}"; fi
     local TAG="SVDQUANT_cl_r${RANK}${CALIB_TAG}_c8-20_steps${STEP}"
-    local RESULT_DIR="/data/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
+    local RESULT_DIR="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
     if [ -f "$RESULT_DIR/metrics.json" ] && [ "$TEST_RUN" = false ]; then
         echo "  SKIP: $TAG"; return
     fi

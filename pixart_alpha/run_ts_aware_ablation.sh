@@ -24,7 +24,7 @@ DATASET="MJHQ"
 BLOCK_SIZE=128
 LOWRANK=32
 RANK_T=4
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 BASE_DIR="$(pwd)"
 LOG_DIR="${BASE_DIR}/logs/ts_aware_experiment"
 mkdir -p "${LOG_DIR}"

@@ -31,7 +31,7 @@ BIT_COMBOS=("NVFP4 NVFP4" "INT8 INT8" "INT8 INT4" "INT4 INT4")
 
 # ---- 경로 설정 ----
 BASE_DIR="$(pwd)"
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 RESULT_BASE="${BASE_DIR}/results/rpca_sweep"
 LOG_DIR="${BASE_DIR}/logs/rpca_sweep"
 mkdir -p "${RESULT_BASE}" "${LOG_DIR}"

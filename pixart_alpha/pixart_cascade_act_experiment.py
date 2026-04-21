@@ -758,7 +758,7 @@ def main():
     parser.add_argument("--dataset_name",   type=str, default="MJHQ",
                         choices=["MJHQ", "sDCI"])
     parser.add_argument("--ref_dir",        type=str,
-                        default="/data/james_dit_ref/ref_images_fp16",
+                        default="/data/jameskimh/james_dit_ref/ref_images_fp16",
                         help="FP16 reference image directory")
     parser.add_argument("--save_dir",       type=str,
                         default="results/cascade_act")

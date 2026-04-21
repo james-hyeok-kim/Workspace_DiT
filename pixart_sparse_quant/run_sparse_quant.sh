@@ -19,7 +19,7 @@ ACCELERATE="/home/jameskimh/.dit/bin/accelerate"
 
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_PATH="PixArt-alpha/PixArt-XL-2-1024-MS"
-REF_DIR="/data/james_dit_ref/ref_images_fp16"
+REF_DIR="/data/jameskimh/james_dit_ref/ref_images_fp16"
 TEST_MODE="${TEST_MODE:-1}"
 
 if [ "$TEST_MODE" -eq 1 ]; then

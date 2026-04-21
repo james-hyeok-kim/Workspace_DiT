@@ -84,7 +84,7 @@ run_one() {
     local MODE_SHORT="${CACHE_MODE/cache_lora/cl}"
     local CACHE_TAG="${MODE_SHORT}_r${RANK}${CALIB_TAG}"
     local TAG="SVDQUANT_${CACHE_TAG}_c${CS}-${CE}_steps${STEP}"
-    local RESULT_DIR="/data/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
+    local RESULT_DIR="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
 
     if [ -f "$RESULT_DIR/metrics.json" ] && [ "$TEST_RUN" = false ]; then
         echo "  SKIP: $TAG"
@@ -187,7 +187,7 @@ run_nested() {
         CACHE_TAG="cl_r${BASE_RANK}"
     fi
     local TAG="SVDQUANT_${CACHE_TAG}_c${START}-${END}_steps${STEP}"
-    local RESULT_DIR="/data/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
+    local RESULT_DIR="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/MJHQ/${TAG}"
 
     if [ -f "$RESULT_DIR/metrics.json" ] && [ "$TEST_RUN" = false ]; then
         echo "  SKIP: $TAG"
