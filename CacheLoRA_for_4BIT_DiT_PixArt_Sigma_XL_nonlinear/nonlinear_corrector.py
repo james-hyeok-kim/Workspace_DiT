@@ -111,15 +111,40 @@ def calibrate_nonlinear_corrector(
     train_epochs: int = 300,
     train_lr: float = 1e-3,
     calib_seed_offset: int = 1000,
+    save_path: str = None,           # 학습된 weights 저장/로드 경로
 ):
     """
     Collect (dx, drift) calibration pairs, then train a nonlinear corrector.
 
-    For corrector_type='film', also collects normalized timestep for conditioning.
+    If save_path exists: load and return immediately (skip calib+training).
+    If save_path provided after training: save weights for future reuse.
 
     Returns:
         (corrector_module, calib_time_sec)
     """
+    import os
+
+    # ---- Load cached corrector if available ----------------------------------
+    if save_path and os.path.exists(save_path):
+        print(f"  [NL-Corrector] Loading cached weights from {save_path}")
+        t0 = time.perf_counter()
+
+        # Determine hidden_dim to reconstruct model
+        hidden_dim = None
+        for name, param in transformer.transformer_blocks[cache_start].named_parameters():
+            if param.ndim >= 2:
+                hidden_dim = param.shape[-1]
+                break
+
+        model = create_corrector(corrector_type, hidden_dim, rank=rank, mid_dim=mid_dim)
+        ckpt = torch.load(save_path, map_location="cpu")
+        model.load_state_dict(ckpt["state_dict"])
+        model = model.half().to(device)
+        model.eval()
+        elapsed = time.perf_counter() - t0
+        print(f"  [NL-Corrector] Loaded in {elapsed:.1f}s")
+        return model, 0.0
+
     t0 = time.perf_counter()
     num_calib = min(num_calib, len(prompts))
     needs_t = (corrector_type == "film")
@@ -289,4 +314,22 @@ def calibrate_nonlinear_corrector(
     print(f"  [NL-Corrector] Done in {calib_time:.1f}s")
 
     model = model.half()  # save VRAM
+
+    # ---- Save trained weights for future reuse --------------------------------
+    if save_path:
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        torch.save({
+            "corrector_type": corrector_type,
+            "hidden_dim": hidden_dim,
+            "rank": rank,
+            "mid_dim": mid_dim,
+            "t_count": t_count,
+            "cache_start": cache_start,
+            "cache_end": cache_end,
+            "state_dict": model.cpu().state_dict(),
+        }, save_path)
+        model = model.to(device)
+        print(f"  [NL-Corrector] Weights saved to {save_path}")
+
     return model, calib_time

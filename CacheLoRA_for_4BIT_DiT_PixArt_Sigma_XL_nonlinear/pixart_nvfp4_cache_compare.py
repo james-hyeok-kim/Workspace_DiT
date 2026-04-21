@@ -284,6 +284,18 @@ def main():
             f"(type={nl_type}, rank={args.lora_rank}, mid={args.nl_mid_dim}, "
             f"calib_samples={n_calib})..."
         )
+        # corrector weights cache path — reuse across num_samples runs
+        _corrector_cache_dir = os.path.join(
+            "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq_cache_adapter",
+            args.quant_method,
+        )
+        _corrector_save_path = os.path.join(
+            _corrector_cache_dir,
+            f"nl_{nl_type}_r{args.lora_rank}_m{args.nl_mid_dim}"
+            f"_cs{cache_start}_ce{cache_end}_steps{t_count}"
+            f"_cal{args.lora_calib}_seed{args.calib_seed_offset}.pt"
+        )
+
         nl_corrector, calib_time_sec = calibrate_nonlinear_corrector(
             pipe=pipe,
             transformer=pipe.transformer,
@@ -299,6 +311,7 @@ def main():
             rank=args.lora_rank,
             mid_dim=args.nl_mid_dim,
             calib_seed_offset=args.calib_seed_offset,
+            save_path=_corrector_save_path,
         )
         accelerator.print(f"  Calibration time: {calib_time_sec:.1f}s")
 

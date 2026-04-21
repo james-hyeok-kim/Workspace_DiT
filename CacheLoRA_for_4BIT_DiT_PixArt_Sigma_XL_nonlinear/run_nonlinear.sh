@@ -7,9 +7,11 @@
 # Total: 18 runs
 #
 # Usage:
-#   bash run_nonlinear.sh                    # 20 samples, all
-#   bash run_nonlinear.sh --test_run         # 2 samples smoke test
-#   bash run_nonlinear.sh --gpu 0            # GPU 지정
+#   bash run_nonlinear.sh                         # 20 samples, all modes
+#   bash run_nonlinear.sh --test_run              # 2 samples smoke test
+#   bash run_nonlinear.sh --gpu 0                 # GPU 지정
+#   bash run_nonlinear.sh --modes gelu,mlp        # 특정 nl 모드만 실행
+#   bash run_nonlinear.sh --modes res,film --gpu 1 --port 29501
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +27,7 @@ PORT=29500
 METHOD=SVDQUANT
 CS=8; CE=20; INTERVAL=2
 RANK=4; MID=32; CALIB=4
+MODES="gelu mlp res film"   # 실행할 nl 모드 (space-separated)
 
 STEPS=(10 15 20)
 
@@ -35,6 +38,7 @@ while [[ "$#" -gt 0 ]]; do
         --port)        PORT="$2"; shift ;;
         --num_samples) NUM_SAMPLES="$2"; shift ;;
         --method)      METHOD="$2"; shift ;;
+        --modes)       MODES="${2//,/ }"; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
     shift
@@ -60,13 +64,10 @@ run_one() {
     fi
 
     local RESULT_DIR="$DATA_ROOT/$METHOD/MJHQ/$TAG"
-    # Baselines (deepcache/cache_lora) always skip if metrics.json exists — avoids overwriting main sweep n=100 data
-    # nl_ modes skip only when not in test_run (so smoke test still exercises them)
+    # Always skip if metrics.json exists (baselines keep n=100 data; nl_ modes skip once verified)
     if [ -f "$RESULT_DIR/metrics.json" ]; then
-        if [[ "$CACHE_MODE" != cache_nl_* ]] || [ "$TEST_RUN" = false ]; then
-            echo "  SKIP: $TAG"
-            return
-        fi
+        echo "  SKIP: $TAG"
+        return
     fi
 
     echo ""
@@ -110,32 +111,40 @@ for STEP in "${STEPS[@]}"; do
 done
 
 # ── Option 1: GELU bottleneck ────────────────────────────────────────
-echo ""
-echo "======= Option 1: GELU bottleneck (rank=$RANK) ======="
-for STEP in "${STEPS[@]}"; do
-    run_one "cache_nl_gelu" "$STEP"
-done
+if [[ " $MODES " == *" gelu "* ]]; then
+    echo ""
+    echo "======= Option 1: GELU bottleneck (rank=$RANK) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_gelu" "$STEP"
+    done
+fi
 
 # ── Option 2: Bottleneck MLP (mid=$MID) ──────────────────────────────
-echo ""
-echo "======= Option 2: Bottleneck MLP (mid=$MID) ======="
-for STEP in "${STEPS[@]}"; do
-    run_one "cache_nl_mlp" "$STEP"
-done
+if [[ " $MODES " == *" mlp "* ]]; then
+    echo ""
+    echo "======= Option 2: Bottleneck MLP (mid=$MID) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_mlp" "$STEP"
+    done
+fi
 
 # ── Option 3: Residual MLP (mid=$MID) ────────────────────────────────
-echo ""
-echo "======= Option 3: Residual MLP (mid=$MID) ======="
-for STEP in "${STEPS[@]}"; do
-    run_one "cache_nl_res" "$STEP"
-done
+if [[ " $MODES " == *" res "* ]]; then
+    echo ""
+    echo "======= Option 3: Residual MLP (mid=$MID) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_res" "$STEP"
+    done
+fi
 
 # ── Option 4: FiLM conditioned (mid=$MID) ────────────────────────────
-echo ""
-echo "======= Option 4: FiLM conditioned (mid=$MID) ======="
-for STEP in "${STEPS[@]}"; do
-    run_one "cache_nl_film" "$STEP"
-done
+if [[ " $MODES " == *" film "* ]]; then
+    echo ""
+    echo "======= Option 4: FiLM conditioned (mid=$MID) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_film" "$STEP"
+    done
+fi
 
 echo ""
 echo "============================================================"
