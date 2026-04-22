@@ -100,6 +100,8 @@ class DeepCacheState:
         self.nl_corrector = None       # nn.Module with forward(dx, t_norm=None)
         self.nl_needs_t: bool = False  # True for FiLM (option 4)
         self.nl_t_count: int | None = None  # total steps for t_norm computation
+        # fd mode: corrector predicts fresh_res directly; stale cache not added at inference
+        self.nl_fd_mode: bool = False
 
         self._image_idx: int = 0
 
@@ -388,7 +390,11 @@ def _make_cached_forward(cache_start: int, cache_end: int,
                         correction = state.nl_corrector(dx.half(), t_norm).to(dtype)
                     else:
                         correction = state.nl_corrector(dx.half()).to(dtype)
-                hidden_states = hidden_states + state.deep_residual_cache + correction
+                if state.nl_fd_mode:
+                    # fd: corrector predicts full residual; stale cache not used
+                    hidden_states = hidden_states + correction
+                else:
+                    hidden_states = hidden_states + state.deep_residual_cache + correction
 
             # ── Direction 5: Block-specific corrector (global dx, per-block residual) ─
             elif state.block_correctors is not None and state.h_in_cached is not None:

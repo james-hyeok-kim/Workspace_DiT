@@ -112,9 +112,15 @@ def calibrate_nonlinear_corrector(
     train_lr: float = 1e-3,
     calib_seed_offset: int = 1000,
     save_path: str = None,           # 학습된 weights 저장/로드 경로
+    loss_type: str = "drift",        # "drift" | "fd" | "fd_weighted"
 ):
     """
-    Collect (dx, drift) calibration pairs, then train a nonlinear corrector.
+    Collect calibration pairs, then train a nonlinear corrector.
+
+    loss_type:
+      "drift"       — target = (fresh_res - stale_res).  Current default.
+      "fd"          — target = fresh_res = blocks(h_in) - h_in.  Stronger signal.
+      "fd_weighted" — same as "fd" but loss weighted by per-token variance of target.
 
     If save_path exists: load and return immediately (skip calib+training).
     If save_path provided after training: save weights for future reuse.
@@ -161,6 +167,8 @@ def calibrate_nonlinear_corrector(
     if hidden_dim is None:
         raise RuntimeError("Cannot determine hidden_dim")
 
+    use_fd = loss_type in ("fd", "fd_weighted")
+
     # ---- Hook-based collection -----------------------------------------------
     step_counter = [0]
     h_in_buf = {}
@@ -181,9 +189,11 @@ def calibrate_nonlinear_corrector(
     h_pre = transformer.transformer_blocks[cache_start].register_forward_pre_hook(_pre_hook)
     h_post = transformer.transformer_blocks[cache_end - 1].register_forward_hook(_post_hook)
 
-    # Collect raw (dx, drift, t_norm) pairs
+    # Collect calibration pairs (dx, target, t_norm)
+    # drift mode:  target = fresh_res_curr - stale_res_prev  (residual of residual)
+    # fd mode:     target = fresh_res_curr = h_out_c - h_in_c  (direct block output delta)
     all_dx = []
-    all_drift = []
+    all_target = []
     all_t = []
 
     try:
@@ -213,10 +223,15 @@ def calibrate_nonlinear_corrector(
                 h_out_p = h_out_buf[s_prev].float()
 
                 dx = (h_in_c - h_in_p).reshape(-1, hidden_dim)
-                drift = ((h_out_c - h_in_c) - (h_out_p - h_in_p)).reshape(-1, hidden_dim)
+                if use_fd:
+                    # Feature distillation: target = full block output delta (stronger signal)
+                    target = (h_out_c - h_in_c).reshape(-1, hidden_dim)
+                else:
+                    # Original drift: target = change in residual between steps
+                    target = ((h_out_c - h_in_c) - (h_out_p - h_in_p)).reshape(-1, hidden_dim)
 
                 all_dx.append(dx)
-                all_drift.append(drift)
+                all_target.append(target)
                 if needs_t:
                     t_norm_val = s / max(n_collected - 1, 1)
                     all_t.append(torch.full((dx.shape[0], 1), t_norm_val))
@@ -228,11 +243,12 @@ def calibrate_nonlinear_corrector(
         h_pre.remove()
         h_post.remove()
 
-    dx_all = torch.cat(all_dx, dim=0)       # [N, H]
-    drift_all = torch.cat(all_drift, dim=0)  # [N, H]
+    dx_all = torch.cat(all_dx, dim=0)         # [N, H]
+    target_all = torch.cat(all_target, dim=0)  # [N, H]
     t_all = torch.cat(all_t, dim=0) if needs_t else None  # [N, 1] or None
     N = dx_all.shape[0]
-    print(f"  [NL-Corrector Calib] Collected {N:,} samples, H={hidden_dim}")
+    print(f"  [NL-Corrector Calib] Collected {N:,} samples, H={hidden_dim}, "
+          f"loss_type={loss_type}")
 
     # ---- Create and train corrector ------------------------------------------
     model = create_corrector(corrector_type, hidden_dim, rank=rank, mid_dim=mid_dim)
@@ -244,7 +260,7 @@ def calibrate_nonlinear_corrector(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=train_epochs)
 
     dataset = torch.utils.data.TensorDataset(
-        dx_all, drift_all,
+        dx_all, target_all,
         *([] if t_all is None else [t_all]),
     )
     loader = torch.utils.data.DataLoader(
@@ -269,7 +285,14 @@ def calibrate_nonlinear_corrector(
                 bx, bd = bx.to(device), bd.to(device)
                 pred = model(bx)
 
-            loss = F.mse_loss(pred, bd)
+            if loss_type == "fd_weighted":
+                with torch.no_grad():
+                    token_var = bd.var(dim=-1, keepdim=True)
+                    weight = token_var / (token_var.mean() + 1e-8)
+                loss = (weight * (pred - bd).pow(2)).mean()
+            else:
+                loss = F.mse_loss(pred, bd)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -285,29 +308,29 @@ def calibrate_nonlinear_corrector(
 
     # Compute final MSE and compare to linear baseline
     with torch.no_grad():
-        # Sample a subset for evaluation
         eval_n = min(N, 32768)
         eval_dx = dx_all[:eval_n].to(device)
-        eval_drift = drift_all[:eval_n].to(device)
+        eval_target = target_all[:eval_n].to(device)
         eval_t = t_all[:eval_n].to(device) if needs_t else None
 
         if needs_t:
             pred = model(eval_dx, eval_t)
         else:
             pred = model(eval_dx)
-        nl_mse = F.mse_loss(pred, eval_drift).item()
+        nl_mse = F.mse_loss(pred, eval_target).item()
 
-        # Linear baseline MSE (from SVD)
-        C = eval_drift.double().T @ eval_dx.double()
+        # Linear baseline MSE (from SVD) — always on same target for fair comparison
+        C = eval_target.double().T @ eval_dx.double()
         C_norm = (C / eval_n).float()
         U, S, Vt = torch.linalg.svd(C_norm, full_matrices=False)
         sq = S[:rank].clamp(min=0.0).sqrt()
         A_lin = (sq.unsqueeze(1) * Vt[:rank, :])
         B_lin = (U[:, :rank] * sq.unsqueeze(0))
         lin_pred = F.linear(F.linear(eval_dx, A_lin), B_lin)
-        lin_mse = F.mse_loss(lin_pred, eval_drift).item()
+        lin_mse = F.mse_loss(lin_pred, eval_target).item()
 
-    print(f"  [NL-Corrector] MSE:  linear={lin_mse:.6f}  nonlinear={nl_mse:.6f}  "
+    print(f"  [NL-Corrector] MSE ({loss_type}):  "
+          f"linear={lin_mse:.6f}  nonlinear={nl_mse:.6f}  "
           f"ratio={nl_mse/max(lin_mse, 1e-10):.4f}")
 
     calib_time = time.perf_counter() - t0
@@ -327,6 +350,7 @@ def calibrate_nonlinear_corrector(
             "t_count": t_count,
             "cache_start": cache_start,
             "cache_end": cache_end,
+            "loss_type": loss_type,
             "state_dict": model.cpu().state_dict(),
         }, save_path)
         model = model.to(device)

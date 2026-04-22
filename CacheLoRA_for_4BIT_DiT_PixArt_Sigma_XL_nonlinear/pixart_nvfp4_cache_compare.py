@@ -99,6 +99,9 @@ def main():
                         help="캐시 모드")
     parser.add_argument("--nl_mid_dim", type=int, default=32,
                         help="Nonlinear corrector mid dimension (options 2-4)")
+    parser.add_argument("--nl_loss_type", type=str, default="drift",
+                        choices=["drift", "fd", "fd_weighted"],
+                        help="Corrector training target: drift (default) | fd | fd_weighted")
     parser.add_argument("--num_steps", type=int, default=20,
                         choices=[5, 10, 15, 20],
                         help="inference step 수")
@@ -159,7 +162,8 @@ def main():
     calib_tag = f"_cal{args.lora_calib}" if args.lora_calib != 4 else ""
     if "cache_nl" in args.cache_mode:
         nl_type = args.cache_mode.replace("cache_nl_", "")
-        cache_tag = f"nl_{nl_type}_r{args.lora_rank}_m{args.nl_mid_dim}{calib_tag}"
+        nl_loss_suffix = "" if args.nl_loss_type == "drift" else f"_{args.nl_loss_type.replace('_', '')}"
+        cache_tag = f"nl_{nl_type}{nl_loss_suffix}_r{args.lora_rank}_m{args.nl_mid_dim}{calib_tag}"
     elif "cache_lora" in args.cache_mode:
         mode_short = args.cache_mode.replace("cache_lora", "cl")
         cache_tag  = f"{mode_short}_r{args.lora_rank}{calib_tag}"
@@ -292,9 +296,10 @@ def main():
             "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq_cache_adapter",
             args.quant_method,
         )
+        _loss_suffix = "" if args.nl_loss_type == "drift" else f"_{args.nl_loss_type.replace('_', '')}"
         _corrector_save_path = os.path.join(
             _corrector_cache_dir,
-            f"nl_{nl_type}_r{args.lora_rank}_m{args.nl_mid_dim}"
+            f"nl_{nl_type}{_loss_suffix}_r{args.lora_rank}_m{args.nl_mid_dim}"
             f"_cs{cache_start}_ce{cache_end}_steps{t_count}"
             f"_cal{args.lora_calib}_seed{args.calib_seed_offset}.pt"
         )
@@ -315,6 +320,7 @@ def main():
             mid_dim=args.nl_mid_dim,
             calib_seed_offset=args.calib_seed_offset,
             save_path=_corrector_save_path,
+            loss_type=args.nl_loss_type,
         )
         accelerator.print(f"  Calibration time: {calib_time_sec:.1f}s")
 
@@ -395,6 +401,7 @@ def main():
             cache_state.nl_corrector = nl_corrector
             cache_state.nl_needs_t = (args.cache_mode == "cache_nl_film")
             cache_state.nl_t_count = t_count
+            cache_state.nl_fd_mode = (args.nl_loss_type in ("fd", "fd_weighted"))
             n_params = sum(p.numel() for p in nl_corrector.parameters())
             accelerator.print(f"  Nonlinear corrector attached "
                               f"(type={args.cache_mode.replace('cache_nl_','')}, params={n_params:,})")

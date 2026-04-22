@@ -31,7 +31,7 @@ PORT=29500
 METHOD=SVDQUANT
 CS=8; CE=20; INTERVAL=2
 RANK=4; MID=32; CALIB=4
-MODES="gelu mlp res film"   # 실행할 nl 모드 (space-separated)
+MODES="gelu mlp res film"   # 실행할 nl 모드 (space-separated); gelu_fd / gelu_fdw 도 지원
 STEPS_OVERRIDE=""            # --steps 로 단일 step 지정 시 사용
 
 STEPS=(10 15 20)
@@ -65,13 +65,15 @@ fi
 NUM_PROCS=1
 
 run_one() {
-    local CACHE_MODE="$1" STEP="$2" EXTRA_FLAGS="$3"
+    local CACHE_MODE="$1" STEP="$2" EXTRA_FLAGS="$3" NL_LOSS="${4:-drift}"
 
     # Build tag for skip check
     local NL_TYPE="${CACHE_MODE#cache_nl_}"
+    local NL_LOSS_SUFFIX=""
+    [ "$NL_LOSS" != "drift" ] && NL_LOSS_SUFFIX="_${NL_LOSS//_/}"
     local TAG
     if [[ "$CACHE_MODE" == cache_nl_* ]]; then
-        TAG="${METHOD}_nl_${NL_TYPE}_r${RANK}_m${MID}_c${CS}-${CE}_steps${STEP}"
+        TAG="${METHOD}_nl_${NL_TYPE}${NL_LOSS_SUFFIX}_r${RANK}_m${MID}_c${CS}-${CE}_steps${STEP}"
     elif [ "$CACHE_MODE" = "cache_lora" ]; then
         TAG="${METHOD}_cl_r${RANK}_c${CS}-${CE}_steps${STEP}"
     elif [ "$CACHE_MODE" = "deepcache" ]; then
@@ -106,6 +108,7 @@ run_one() {
         --lora_rank      "$RANK"
         --lora_calib     "$CALIB"
         --nl_mid_dim     "$MID"
+        --nl_loss_type   "$NL_LOSS"
         $EXTRA_FLAGS
         $TEST_FLAG
     )
@@ -173,6 +176,24 @@ if [[ " $MODES " == *" film "* ]]; then
     echo "======= Option 4: FiLM conditioned (mid=$MID) ======="
     for STEP in "${STEPS[@]}"; do
         run_one "cache_nl_film" "$STEP"
+    done
+fi
+
+# ── Option 5: GELU + Feature Distillation (fd) ───────────────────────
+if [[ " $MODES " == *" gelu_fd "* ]]; then
+    echo ""
+    echo "======= Option 5: GELU + Feature Distillation (rank=$RANK) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_gelu" "$STEP" "" "fd"
+    done
+fi
+
+# ── Option 6: GELU + FD + token-variance weighting (fd_weighted) ─────
+if [[ " $MODES " == *" gelu_fdw "* ]]; then
+    echo ""
+    echo "======= Option 6: GELU + FD Weighted (rank=$RANK) ======="
+    for STEP in "${STEPS[@]}"; do
+        run_one "cache_nl_gelu" "$STEP" "" "fd_weighted"
     done
 fi
 
