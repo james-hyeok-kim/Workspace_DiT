@@ -20,6 +20,7 @@ PYTHON_SCRIPT="$SCRIPT_DIR/pixart_nvfp4_cache_compare.py"
 PYTHON="/home/jovyan/.dit/bin/python3"
 ACCELERATE_CLI="/home/jovyan/.dit/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py"
 ENV_PYTHON="$PYTHON $ACCELERATE_CLI"
+export PYTHONPATH="$SCRIPT_DIR"
 DATA_ROOT="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq"
 
 NUM_SAMPLES=20
@@ -55,15 +56,13 @@ if [ -n "$STEPS_OVERRIDE" ]; then
 fi
 
 # GPU 설정: --gpu 로 단일 GPU 지정 시 CUDA_VISIBLE_DEVICES 설정
-# --gpu 없으면 CUDA_VISIBLE_DEVICES 미설정 → accelerate 가 감지한 모든 GPU 사용
 if [ -n "$GPU_ID" ]; then
     export CUDA_VISIBLE_DEVICES="$GPU_ID"
     echo "Using GPU: $GPU_ID"
 fi
 
-# 2-GPU split: CUDA_VISIBLE_DEVICES=0,1 이면 num_processes=2
-NUM_VISIBLE=$(echo "${CUDA_VISIBLE_DEVICES:-0,1}" | tr ',' '\n' | wc -l)
-NUM_PROCS="$NUM_VISIBLE"
+# num_processes: 항상 1 (NCCL 없이 단일 프로세스)
+NUM_PROCS=1
 
 run_one() {
     local CACHE_MODE="$1" STEP="$2" EXTRA_FLAGS="$3"
@@ -95,23 +94,32 @@ run_one() {
     echo "  Running: $TAG  (num_processes=$NUM_PROCS)"
     echo "  ─────────────────────────────────────────"
 
-    $ENV_PYTHON launch \
-        --num_processes "$NUM_PROCS" \
-        --main_process_port "$PORT" \
-        "$PYTHON_SCRIPT" \
-        --quant_method   "$METHOD" \
-        --cache_mode     "$CACHE_MODE" \
-        --num_steps      "$STEP" \
-        --num_samples    "$NUM_SAMPLES" \
-        --guidance_scale 4.5 \
-        --cache_start    "$CS" \
-        --cache_end      "$CE" \
-        --deepcache_interval "$INTERVAL" \
-        --lora_rank      "$RANK" \
-        --lora_calib     "$CALIB" \
-        --nl_mid_dim     "$MID" \
-        $EXTRA_FLAGS \
+    COMMON_ARGS=(
+        --quant_method   "$METHOD"
+        --cache_mode     "$CACHE_MODE"
+        --num_steps      "$STEP"
+        --num_samples    "$NUM_SAMPLES"
+        --guidance_scale 4.5
+        --cache_start    "$CS"
+        --cache_end      "$CE"
+        --deepcache_interval "$INTERVAL"
+        --lora_rank      "$RANK"
+        --lora_calib     "$CALIB"
+        --nl_mid_dim     "$MID"
+        $EXTRA_FLAGS
         $TEST_FLAG
+    )
+
+    if [ "$NUM_PROCS" -eq 1 ]; then
+        # accelerate 없이 직접 실행 — torchrun sys.path 문제 회피
+        $PYTHON "$PYTHON_SCRIPT" "${COMMON_ARGS[@]}"
+    else
+        $ENV_PYTHON launch \
+            --num_processes "$NUM_PROCS" \
+            --main_process_port "$PORT" \
+            "$PYTHON_SCRIPT" \
+            "${COMMON_ARGS[@]}"
+    fi
 
     echo "  Done: $TAG"
 }

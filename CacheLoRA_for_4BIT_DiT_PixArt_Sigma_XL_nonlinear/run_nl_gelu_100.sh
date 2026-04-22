@@ -1,44 +1,46 @@
 #!/bin/bash
-# run_nl_gelu_100.sh — nl_gelu 100-sample, step20 → step15, 2-GPU sequential
-#
-# Usage:
-#   bash run_nl_gelu_100.sh                   # 본 실행
-#   nohup bash run_nl_gelu_100.sh &> logs/full_gelu100.log &
-#   disown  # 세션 끊겨도 계속 실행
+# run_nl_gelu_100.sh — nl_gelu 100-sample
+# GPU 0: steps20 / GPU 1: steps15 — 동시 병렬 실행 (각 1-GPU, NCCL 없음)
 
 set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 mkdir -p logs
 
-export CUDA_VISIBLE_DEVICES=0,1
-
 echo "============================================================"
-echo "  nl_gelu 100-sample run  (2-GPU: step20 → step15)"
+echo "  nl_gelu 100-sample run"
+echo "  GPU 0: steps20  |  GPU 1: steps15  (parallel)"
 echo "  $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================================"
 
-# step 20 먼저
-echo ""
-echo ">>> step 20 start  $(date '+%H:%M:%S')"
-bash run_nonlinear.sh \
-    --modes gelu \
-    --num_samples 100 \
-    --steps 20 \
-    2>&1 | tee logs/gelu100_s20_2gpu.log
-echo ">>> step 20 done   $(date '+%H:%M:%S')"
+# GPU 0 — steps20
+CUDA_VISIBLE_DEVICES=0 bash run_nonlinear.sh \
+    --modes gelu --num_samples 100 --steps 20 --gpu 0 --port 29500 \
+    > logs/gelu100_s20_gpu0.log 2>&1 &
+PID0=$!
 
-# step 15 이어서
+# GPU 1 — steps15
+CUDA_VISIBLE_DEVICES=1 bash run_nonlinear.sh \
+    --modes gelu --num_samples 100 --steps 15 --gpu 1 --port 29501 \
+    > logs/gelu100_s15_gpu1.log 2>&1 &
+PID1=$!
+
+echo "GPU 0 (steps20) PID=$PID0 → logs/gelu100_s20_gpu0.log"
+echo "GPU 1 (steps15) PID=$PID1 → logs/gelu100_s15_gpu1.log"
 echo ""
-echo ">>> step 15 start  $(date '+%H:%M:%S')"
-bash run_nonlinear.sh \
-    --modes gelu \
-    --num_samples 100 \
-    --steps 15 \
-    2>&1 | tee logs/gelu100_s15_2gpu.log
-echo ">>> step 15 done   $(date '+%H:%M:%S')"
+echo "Waiting..."
+
+EXIT0=0; EXIT1=0
+wait $PID0 || EXIT0=$?
+wait $PID1 || EXIT1=$?
 
 echo ""
 echo "============================================================"
-echo "  ALL DONE  $(date '+%Y-%m-%d %H:%M:%S')"
+if [ $EXIT0 -eq 0 ] && [ $EXIT1 -eq 0 ]; then
+    echo "  ALL DONE  $(date '+%Y-%m-%d %H:%M:%S')"
+else
+    echo "  DONE WITH ERRORS: GPU0=$EXIT0 GPU1=$EXIT1"
+    [ $EXIT0 -ne 0 ] && echo "  → logs/gelu100_s20_gpu0.log"
+    [ $EXIT1 -ne 0 ] && echo "  → logs/gelu100_s15_gpu1.log"
+fi
 echo "============================================================"
