@@ -46,7 +46,7 @@ declare -a CONFIGS=(
 for cfg in "${CONFIGS[@]}"; do
     read -r RANK INTERVAL STEPS <<< "$cfg"
     TAG="SVDQUANT_cache_lora_r${RANK}_steps${STEPS}"
-    RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+    RESULT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq/SVDQUANT/cache_lora_r${RANK}_steps${STEPS}"
 
     if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
         echo "⏭️  SKIP (already exists): $TAG"

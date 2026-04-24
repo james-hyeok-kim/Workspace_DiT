@@ -344,6 +344,7 @@ def main():
     parser.add_argument("--numeric_dtype", type=str, default="half")
     parser.add_argument("--block_size", type=int, default=16)
     parser.add_argument("--dataset_name", type=str, default="MJHQ", choices=["MJHQ", "sDCI"])
+    parser.add_argument("--img_base_dir", type=str, default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--quant_method", type=str, default="SVD", choices=["SVD", "RPCA"])
     args = parser.parse_args()
 
@@ -354,7 +355,14 @@ def main():
     accelerator = Accelerator()
     device = accelerator.device
     dataset_ref_dir = os.path.join(args.ref_dir, args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name)
+    _img_rel = args.save_dir
+    if "/results/" in _img_rel:
+        _img_rel = _img_rel.split("/results/", 1)[1]
+    elif _img_rel.startswith("./results/"):
+        _img_rel = _img_rel[len("./results/"):]
+    elif _img_rel.startswith("results/"):
+        _img_rel = _img_rel[len("results/"):]
+    dataset_save_dir = os.path.join(args.img_base_dir, _img_rel)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir, exist_ok=True)

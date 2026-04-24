@@ -70,6 +70,7 @@ def evaluate_step_count(
     s_count: int,
     ref_base_dir: str,
     save_base_dir: str,
+    dataset_name: str,
     device,
     accelerator,
     clip_model=None,
@@ -78,7 +79,7 @@ def evaluate_step_count(
     """Generate quantized images at t_count steps and compute metrics vs FP16 refs."""
 
     step_ref_dir  = os.path.join(ref_base_dir,  f"steps_{t_count}")
-    step_save_dir = os.path.join(save_base_dir, f"steps_{t_count}")
+    step_save_dir = os.path.join(save_base_dir, f"fp16_steps{t_count}", dataset_name)
 
     if accelerator.is_main_process:
         os.makedirs(step_save_dir, exist_ok=True)
@@ -171,7 +172,7 @@ def main():
     parser.add_argument("--test_run",     action="store_true",
                         help="2-sample smoke test")
     parser.add_argument("--ref_dir",      type=str,  default="./ref_images")
-    parser.add_argument("--save_dir",     type=str,  default="./results")
+    parser.add_argument("--save_dir",     type=str,  default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--model_path",   type=str,
                         default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name", type=str,  default="MJHQ",
@@ -193,7 +194,7 @@ def main():
     p_count  = 2 if args.test_run else min(64, s_count)
 
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name, "step_sweep")
+    dataset_save_dir = os.path.join(args.save_dir, "step_sweep", args.dataset_name)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)
@@ -276,7 +277,7 @@ def main():
         accelerator.print(f"\n=== Evaluating steps={t} ===")
         result = evaluate_step_count(
             pipe, t, prompts, s_count,
-            dataset_ref_dir, dataset_save_dir,
+            dataset_ref_dir, args.save_dir, args.dataset_name,
             device, accelerator,
             clip_model, clip_processor,
         )

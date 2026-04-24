@@ -11,7 +11,7 @@
 #   bash run_experiment.sh --steps 15               # 15-step만
 #   bash run_experiment.sh --method MRGPTQ --cache deepcache --steps 20
 #
-# 결과: results/MJHQ/{METHOD}_{CACHE}_steps{N}/
+# 결과: /data/jameskimh/james_dit_pixart_xl_mjhq/{METHOD}/{CACHE}_steps{N}/
 
 set -e
 
@@ -70,7 +70,7 @@ for METHOD in "${METHODS[@]}"; do
     for CACHE in "${CACHES[@]}"; do
         for STEP in "${STEPS[@]}"; do
             TAG="${METHOD}_${CACHE}_steps${STEP}"
-            RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+            RESULT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq/${METHOD}/${TAG#${METHOD}_}"
 
             # 이미 완료된 결과면 skip
             if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
@@ -107,5 +107,5 @@ done
 
 echo "============================================================"
 echo "All runs complete."
-echo "Results in: $SCRIPT_DIR/results/MJHQ/"
+echo "Results in: /data/jameskimh/james_dit_pixart_xl_mjhq/"
 echo "============================================================"

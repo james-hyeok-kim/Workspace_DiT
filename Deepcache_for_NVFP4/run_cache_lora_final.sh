@@ -51,7 +51,7 @@ cd "$SCRIPT_DIR"
 
 for METHOD in "${METHODS[@]}"; do
     TAG="${METHOD}_cache_lora_r${RANK}_steps${STEPS}"
-    RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+    RESULT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq/${METHOD}/${TAG#${METHOD}_}"
 
     # 이미 완료된 결과면 skip (smoke test 모드에서는 항상 재실행)
     if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
@@ -81,5 +81,5 @@ done
 
 echo "============================================================"
 echo "Cache-LoRA final sweep complete."
-echo "Results in: $SCRIPT_DIR/results/MJHQ/"
+echo "Results in: /data/jameskimh/james_dit_pixart_xl_mjhq/"
 echo "============================================================"

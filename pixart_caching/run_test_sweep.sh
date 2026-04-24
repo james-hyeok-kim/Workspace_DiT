@@ -16,7 +16,7 @@ LOWRANK=32
 NUM_STEPS=15   # 조합1 최적 step
 
 REF_DIR="$SCRIPT_DIR/ref_images"
-SAVE_DIR="$SCRIPT_DIR/results"
+SAVE_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -38,4 +38,4 @@ accelerate launch --num_processes 1 \
     2>&1 | tee "$LOG_FILE"
 
 echo ""
-echo "Results: $SAVE_DIR/$DATASET/deepcache/test_sweep/test_sweep_summary.csv"
+echo "Results: $SAVE_DIR/deepcache/test_sweep/$DATASET/test_sweep_summary.csv"

@@ -46,7 +46,7 @@ cd "$SCRIPT_DIR"
 for METHOD in "${METHODS[@]}"; do
     for RANK in "${RANKS[@]}"; do
         TAG="${METHOD}_cache_lora_r${RANK}_steps${STEPS}"
-        RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+        RESULT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq/${METHOD}/${TAG#${METHOD}_}"
 
         if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
             echo "⏭️  SKIP (already exists): $TAG"
@@ -75,5 +75,5 @@ done
 
 echo "============================================================"
 echo "All cache_lora sweep runs complete."
-echo "Results in: $SCRIPT_DIR/results/MJHQ/"
+echo "Results in: /data/jameskimh/james_dit_pixart_xl_mjhq/"
 echo "============================================================"

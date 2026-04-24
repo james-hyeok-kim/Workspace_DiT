@@ -28,7 +28,7 @@ CACHE_END=24
 FULL_STEPS="0"
 
 REF_DIR="$SCRIPT_DIR/ref_images"
-SAVE_DIR="$SCRIPT_DIR/results"
+SAVE_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -75,7 +75,7 @@ accelerate launch --num_processes 1 \
 
 echo ""
 if [ -n "$SWEEP_FLAG" ]; then
-    echo "Sweep results: $SAVE_DIR/$DATASET/deepcache/sweep_summary.json"
+    echo "Sweep results: $SAVE_DIR/deepcache/$DATASET/sweep_summary.json"
 else
-    echo "Results: $SAVE_DIR/$DATASET/deepcache/interval${CACHE_INTERVAL}_s${CACHE_START}_e${CACHE_END}/metrics.json"
+    echo "Results: $SAVE_DIR/deepcache/interval${CACHE_INTERVAL}_s${CACHE_START}_e${CACHE_END}_gs4.5_steps${NUM_STEPS}/$DATASET/metrics.json"
 fi

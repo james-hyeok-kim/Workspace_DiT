@@ -30,7 +30,7 @@ CLI 예시:
   accelerate launch pixart_nvfp4_cache_compare.py --quant_method MRGPTQ --cache_mode deepcache --test_run
 
 결과 위치:
-  results/{dataset}/{quant_method}_{cache_mode}_steps{N}/
+  /data/jameskimh/james_dit_pixart_xl_mjhq/{quant_method}/{cache_mode}_steps{N}/
     sample_*.png, metrics.json, summary.csv
 """
 
@@ -99,7 +99,7 @@ def main():
     parser.add_argument("--dataset_name", type=str, default="MJHQ",
                         choices=["MJHQ", "sDCI"])
     parser.add_argument("--ref_dir", type=str, default="./ref_images")
-    parser.add_argument("--save_dir", type=str, default="./results")
+    parser.add_argument("--save_dir", type=str, default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--guidance_scale", type=float, default=4.5)
 
     # ── 양자화 하이퍼파라미터 ─────────────────────────────────────────────────
@@ -139,7 +139,8 @@ def main():
     else:
         run_tag = f"{args.quant_method}_{cache_tag}_c{cache_start}-{cache_end}_steps{t_count}"
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name, run_tag)
+    run_suffix = run_tag[len(args.quant_method) + 1:]
+    dataset_save_dir = os.path.join(args.save_dir, args.quant_method, run_suffix)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)

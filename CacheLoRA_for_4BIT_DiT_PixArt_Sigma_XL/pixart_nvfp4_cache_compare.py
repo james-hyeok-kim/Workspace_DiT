@@ -171,7 +171,7 @@ def main():
         dataset_ref_dir = ref_dir_resolved
     else:
         dataset_ref_dir = os.path.join(ref_dir_resolved, args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name, run_tag)
+    dataset_save_dir = os.path.join(args.save_dir, run_tag)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)

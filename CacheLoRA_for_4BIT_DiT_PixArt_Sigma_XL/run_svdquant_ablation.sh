@@ -88,7 +88,7 @@ run_one() {
         TAG="${METHOD_TAG}_${CACHE_TAG}${INTERVAL_TAG}_c${CS}-${CE}_steps${STEP}"
     fi
 
-    RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+    RESULT_DIR="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/${TAG}"
     if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
         echo "  SKIP: $TAG"
         return
@@ -174,5 +174,5 @@ fi
 echo ""
 echo "============================================================"
 echo "SVDQUANT ablation sweep complete."
-echo "Results in: $SCRIPT_DIR/results/MJHQ/"
+echo "Results in: /data/jameskimh/james_dit_pixart_sigma_xl_mjhq/SVDQUANT/"
 echo "============================================================"

@@ -283,6 +283,7 @@ def main():
     parser.add_argument("--save_dir",      type=str,   default="./results/tucker_experiment/TUCKER_R64")
     parser.add_argument("--model_path",    type=str,   default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name",  type=str,   default="MJHQ", choices=["MJHQ", "sDCI"])
+    parser.add_argument("--img_base_dir",  type=str,   default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--act_mode",      type=str,   default="NVFP4")
     parser.add_argument("--wgt_core_mode", type=str,   default="INT3",
                         choices=["FP16", "INT2", "INT3", "INT4", "INT8", "NVFP4"],
@@ -314,7 +315,14 @@ def main():
 
     s_target = 2 if args.test_run else args.num_samples
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name)
+    _img_rel = args.save_dir
+    if "/results/" in _img_rel:
+        _img_rel = _img_rel.split("/results/", 1)[1]
+    elif _img_rel.startswith("./results/"):
+        _img_rel = _img_rel[len("./results/"):]
+    elif _img_rel.startswith("results/"):
+        _img_rel = _img_rel[len("results/"):]
+    dataset_save_dir = os.path.join(args.img_base_dir, _img_rel)
 
     rank_desc = f"ratio={args.rank_ratio}" if args.rank_ratio is not None else f"abs={args.lowrank}"
     lora_desc = "no_lora" if args.no_lora else f"lora_r={args.lora_rank}"

@@ -19,7 +19,7 @@ LOWRANK=32
 STEP_COUNTS="5,8,10,12,15,20"
 
 REF_DIR="$SCRIPT_DIR/ref_images"
-SAVE_DIR="$SCRIPT_DIR/results"
+SAVE_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -51,4 +51,4 @@ accelerate launch --num_processes 1 \
     2>&1 | tee "$LOG_FILE"
 
 echo ""
-echo "Results saved to: $SAVE_DIR/$DATASET/step_sweep/summary.json"
+echo "Results saved to: $SAVE_DIR/step_sweep/$DATASET/summary.json"

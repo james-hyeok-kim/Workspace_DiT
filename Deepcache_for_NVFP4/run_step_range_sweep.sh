@@ -75,7 +75,7 @@ run_one() {
         TAG="${METHOD}_${CACHE_TAG}_c${CS}-${CE}_steps${STEP}"
     fi
 
-    RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+    RESULT_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq/${METHOD}/${TAG#${METHOD}_}"
 
     if [ -f "$RESULT_DIR/metrics.json" ] && ! $TEST_RUN; then
         echo "  ⏭️  SKIP: $TAG"
@@ -176,5 +176,5 @@ done
 echo ""
 echo "============================================================"
 echo "Step × Range sweep complete."
-echo "Results in: $SCRIPT_DIR/results/MJHQ/"
+echo "Results in: /data/jameskimh/james_dit_pixart_xl_mjhq/"
 echo "============================================================"

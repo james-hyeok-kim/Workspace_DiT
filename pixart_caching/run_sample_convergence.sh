@@ -30,7 +30,7 @@ NS="20,100,250,500,750,1000"
 CACHE_START=8
 CACHE_END=20
 
-SAVE_DIR="$SCRIPT_DIR/results"
+SAVE_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 LOG_DIR="$SCRIPT_DIR/logs"
 CONV_DIR="$SCRIPT_DIR/results/convergence"
 mkdir -p "$LOG_DIR" "$CONV_DIR"
@@ -42,7 +42,7 @@ TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 REF_DIR_20="/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps20"
 REF_DIR_15="/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps15"
 
-for d in "$REF_DIR_20" "$REF_DIR_15"; do
+for d in "$REF_DIR_20/MJHQ" "$REF_DIR_15/MJHQ"; do
     if [ ! -d "$d" ] || [ "$(ls "$d"/ref_*.png 2>/dev/null | wc -l)" -lt "$N_MAX" ]; then
         echo "⚠️  Ref images not ready: $d"
         echo "   Run first: bash run_generate_refs.sh"
@@ -51,9 +51,9 @@ for d in "$REF_DIR_20" "$REF_DIR_15"; do
 done
 
 # 저장 디렉토리 (config_tag 기반, 자동 생성)
-SAVE_A="$SAVE_DIR/$DATASET/deepcache/interval1_s${CACHE_START}_e${CACHE_END}_gs4.5_steps20"
-SAVE_B="$SAVE_DIR/$DATASET/deepcache/interval1_s${CACHE_START}_e${CACHE_END}_gs4.5_steps15"
-SAVE_C="$SAVE_DIR/$DATASET/deepcache/interval2_s${CACHE_START}_e${CACHE_END}_gs4.5_steps15"
+SAVE_A="$SAVE_DIR/deepcache/interval1_s${CACHE_START}_e${CACHE_END}_gs4.5_steps20/$DATASET"
+SAVE_B="$SAVE_DIR/deepcache/interval1_s${CACHE_START}_e${CACHE_END}_gs4.5_steps15/$DATASET"
+SAVE_C="$SAVE_DIR/deepcache/interval2_s${CACHE_START}_e${CACHE_END}_gs4.5_steps15/$DATASET"
 
 echo ""
 echo "================================================================"
@@ -190,7 +190,7 @@ import csv, os, glob
 
 conv_dir = os.path.join(os.path.dirname(os.path.abspath(".")),
     "workspace/Workspace_DiT/pixart_caching/results/convergence")
-conv_dir = "/home/jameskimh/workspace/Workspace_DiT/pixart_caching/results/convergence"
+conv_dir = "/home/jovyan/workspace/Workspace_DiT/pixart_caching/results/convergence"
 
 files = sorted(glob.glob(f"{conv_dir}/*_conv.csv"))
 all_rows = []

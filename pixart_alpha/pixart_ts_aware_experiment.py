@@ -467,6 +467,7 @@ def main():
     parser.add_argument("--save_dir",         type=str,   default="./results/ts_aware_experiment/TSAWARE_G3_NOCORR")
     parser.add_argument("--model_path",       type=str,   default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name",     type=str,   default="MJHQ", choices=["MJHQ", "sDCI"])
+    parser.add_argument("--img_base_dir",     type=str,   default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--quant_method",     type=str,   default="TSAWARE",
                         choices=["FP16", "BASELINE", "TSAWARE"])
     # TSAWARE 하이퍼파라미터
@@ -492,7 +493,14 @@ def main():
 
     s_target = 2 if args.test_run else args.num_samples
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name)
+    _img_rel = args.save_dir
+    if "/results/" in _img_rel:
+        _img_rel = _img_rel.split("/results/", 1)[1]
+    elif _img_rel.startswith("./results/"):
+        _img_rel = _img_rel[len("./results/"):]
+    elif _img_rel.startswith("results/"):
+        _img_rel = _img_rel[len("results/"):]
+    dataset_save_dir = os.path.join(args.img_base_dir, _img_rel)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)

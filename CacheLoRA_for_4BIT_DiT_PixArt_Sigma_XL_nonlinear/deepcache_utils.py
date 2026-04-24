@@ -102,6 +102,8 @@ class DeepCacheState:
         self.nl_t_count: int | None = None  # total steps for t_norm computation
         # fd mode: corrector predicts fresh_res directly; stale cache not added at inference
         self.nl_fd_mode: bool = False
+        # train mode: skip no_grad wrapper so gradient flows through corrector (trajectory distill)
+        self.nl_train_mode: bool = False
 
         self._image_idx: int = 0
 
@@ -380,16 +382,23 @@ def _make_cached_forward(cache_start: int, cache_end: int,
             elif state.nl_corrector is not None and state.h_in_cached is not None:
                 dx = hidden_states - state.h_in_cached
                 dtype = hidden_states.dtype
-                with torch.no_grad():
+                def _apply_nl_corrector():
+                    cdtype = next(state.nl_corrector.parameters()).dtype
                     if state.nl_needs_t and state.nl_t_count is not None:
                         t_val = step_idx / max(state.nl_t_count - 1, 1)
                         t_norm = torch.full(
                             (*dx.shape[:-1], 1), t_val,
-                            device=dx.device, dtype=torch.float16,
+                            device=dx.device, dtype=cdtype,
                         )
-                        correction = state.nl_corrector(dx.half(), t_norm).to(dtype)
+                        return state.nl_corrector(dx.to(cdtype), t_norm).to(dtype)
                     else:
-                        correction = state.nl_corrector(dx.half()).to(dtype)
+                        return state.nl_corrector(dx.to(cdtype)).to(dtype)
+
+                if state.nl_train_mode:
+                    correction = _apply_nl_corrector()
+                else:
+                    with torch.no_grad():
+                        correction = _apply_nl_corrector()
                 if state.nl_fd_mode:
                     # fd: corrector predicts full residual; stale cache not used
                     hidden_states = hidden_states + correction

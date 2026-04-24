@@ -57,7 +57,9 @@ from deepcache_utils import (
     calibrate_cache_lora_svdaware,
     calibrate_cache_lora_teacherforced,
 )
-from nonlinear_corrector import calibrate_nonlinear_corrector
+from nonlinear_corrector import (calibrate_nonlinear_corrector,
+                                  fine_tune_with_trajectory_distillation,
+                                  fine_tune_combined)
 from eval_utils import get_prompts, generate_and_evaluate
 from quant_methods import (
     apply_rtn_quantization,
@@ -95,13 +97,14 @@ def main():
                                  "cache_lora_block", "cache_lora_svd",
                                  "cache_lora_tf",
                                  "cache_nl_gelu", "cache_nl_mlp",
-                                 "cache_nl_res", "cache_nl_film"],
+                                 "cache_nl_res", "cache_nl_film",
+                                 "cache_nl_gelu_t"],
                         help="캐시 모드")
     parser.add_argument("--nl_mid_dim", type=int, default=32,
                         help="Nonlinear corrector mid dimension (options 2-4)")
     parser.add_argument("--nl_loss_type", type=str, default="drift",
-                        choices=["drift", "fd", "fd_weighted"],
-                        help="Corrector training target: drift (default) | fd | fd_weighted")
+                        choices=["drift", "fd", "fd_weighted", "fd_stratified", "traj_distill", "drift_traj"],
+                        help="Corrector training target: drift | fd | fd_weighted | fd_stratified | traj_distill | drift_traj")
     parser.add_argument("--num_steps", type=int, default=20,
                         choices=[5, 10, 15, 20],
                         help="inference step 수")
@@ -216,9 +219,12 @@ def main():
                 ).images[0]
                 img.save(ref_path)
 
-        del pipe_ref
-        torch.cuda.empty_cache()
-        gc.collect()
+        if args.nl_loss_type in ("traj_distill", "drift_traj"):
+            fp16_pipe_traj = pipe_ref  # keep alive for trajectory/combined distillation
+        else:
+            del pipe_ref
+            torch.cuda.empty_cache()
+            gc.collect()
         accelerator.print(f"  {s_count} refs ready in {dataset_ref_dir}")
 
     accelerator.wait_for_everyone()
@@ -282,6 +288,7 @@ def main():
     svd_corrector_A = svd_corrector_B = None
     nl_corrector = None
     calib_time_sec = None
+    _drift_tensors = None
 
     if "cache_nl" in args.cache_mode:
         n_calib = 2 if args.test_run else args.lora_calib
@@ -296,7 +303,9 @@ def main():
             "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq_cache_adapter",
             args.quant_method,
         )
-        _loss_suffix = "" if args.nl_loss_type == "drift" else f"_{args.nl_loss_type.replace('_', '')}"
+        # drift_traj: Phase 2.5 trains base drift corrector (reuses existing .pt if available)
+        _base_loss_type = "drift" if args.nl_loss_type == "drift_traj" else args.nl_loss_type
+        _loss_suffix = "" if _base_loss_type == "drift" else f"_{_base_loss_type.replace('_', '')}"
         _corrector_save_path = os.path.join(
             _corrector_cache_dir,
             f"nl_{nl_type}{_loss_suffix}_r{args.lora_rank}_m{args.nl_mid_dim}"
@@ -304,24 +313,47 @@ def main():
             f"_cal{args.lora_calib}_seed{args.calib_seed_offset}.pt"
         )
 
-        nl_corrector, calib_time_sec = calibrate_nonlinear_corrector(
-            pipe=pipe,
-            transformer=pipe.transformer,
-            cache_start=cache_start,
-            cache_end=cache_end,
-            cache_interval=args.deepcache_interval,
-            prompts=prompts,
-            num_calib=n_calib,
-            t_count=t_count,
-            guidance_scale=args.guidance_scale,
-            device=device,
-            corrector_type=nl_type,
-            rank=args.lora_rank,
-            mid_dim=args.nl_mid_dim,
-            calib_seed_offset=args.calib_seed_offset,
-            save_path=_corrector_save_path,
-            loss_type=args.nl_loss_type,
-        )
+        _need_drift_data = (args.nl_loss_type == "drift_traj")
+        if _need_drift_data:
+            nl_corrector, calib_time_sec, _drift_dx, _drift_tgt = calibrate_nonlinear_corrector(
+                pipe=pipe,
+                transformer=pipe.transformer,
+                cache_start=cache_start,
+                cache_end=cache_end,
+                cache_interval=args.deepcache_interval,
+                prompts=prompts,
+                num_calib=n_calib,
+                t_count=t_count,
+                guidance_scale=args.guidance_scale,
+                device=device,
+                corrector_type=nl_type,
+                rank=args.lora_rank,
+                mid_dim=args.nl_mid_dim,
+                calib_seed_offset=args.calib_seed_offset,
+                save_path=_corrector_save_path,
+                loss_type=_base_loss_type,
+                return_data=True,
+            )
+            _drift_tensors = (_drift_dx, _drift_tgt)
+        else:
+            nl_corrector, calib_time_sec = calibrate_nonlinear_corrector(
+                pipe=pipe,
+                transformer=pipe.transformer,
+                cache_start=cache_start,
+                cache_end=cache_end,
+                cache_interval=args.deepcache_interval,
+                prompts=prompts,
+                num_calib=n_calib,
+                t_count=t_count,
+                guidance_scale=args.guidance_scale,
+                device=device,
+                corrector_type=nl_type,
+                rank=args.lora_rank,
+                mid_dim=args.nl_mid_dim,
+                calib_seed_offset=args.calib_seed_offset,
+                save_path=_corrector_save_path,
+                loss_type=_base_loss_type,
+            )
         accelerator.print(f"  Calibration time: {calib_time_sec:.1f}s")
 
     elif "cache_lora" in args.cache_mode:
@@ -381,7 +413,7 @@ def main():
                              "cache_lora_ts", "cache_lora_block", "cache_lora_svd",
                              "cache_lora_tf",
                              "cache_nl_gelu", "cache_nl_mlp",
-                             "cache_nl_res", "cache_nl_film")
+                             "cache_nl_res", "cache_nl_film", "cache_nl_gelu_t")
     if args.cache_mode in _cache_modes_with_dc:
         accelerator.print(
             f"\n[Phase 3] Installing DeepCache [{args.cache_mode}] "
@@ -399,9 +431,10 @@ def main():
         # Attach correctors based on mode
         if nl_corrector is not None:
             cache_state.nl_corrector = nl_corrector
-            cache_state.nl_needs_t = (args.cache_mode == "cache_nl_film")
+            cache_state.nl_needs_t = (args.cache_mode in ("cache_nl_film", "cache_nl_gelu_t")
+                                      or args.nl_loss_type == "fd_stratified")
             cache_state.nl_t_count = t_count
-            cache_state.nl_fd_mode = (args.nl_loss_type in ("fd", "fd_weighted"))
+            cache_state.nl_fd_mode = (args.nl_loss_type in ("fd", "fd_weighted", "fd_stratified"))
             n_params = sum(p.numel() for p in nl_corrector.parameters())
             accelerator.print(f"  Nonlinear corrector attached "
                               f"(type={args.cache_mode.replace('cache_nl_','')}, params={n_params:,})")
@@ -435,6 +468,85 @@ def main():
     else:
         accelerator.print("\n[Phase 3] No caching (cache_mode=none).")
         speedup_est = 1.0
+
+    # -----------------------------------------------------------------------
+    # Phase 2.75: Trajectory-based fine-tuning (optional)
+    # -----------------------------------------------------------------------
+    _nl_base = args.cache_mode.replace("cache_nl_", "")
+    if (args.nl_loss_type in ("traj_distill", "drift_traj")
+            and cache_state is not None
+            and cache_state.nl_corrector is not None
+            and accelerator.is_main_process):
+
+        if args.nl_loss_type == "traj_distill":
+            _traj_save_path = os.path.join(
+                "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq_cache_adapter",
+                args.quant_method,
+                f"nl_{_nl_base}_trajdistill"
+                f"_r{args.lora_rank}_m{args.nl_mid_dim}"
+                f"_cs{cache_start}_ce{cache_end}_steps{t_count}"
+                f"_cal{args.lora_calib}_seed{args.calib_seed_offset}.pt",
+            )
+            if os.path.exists(_traj_save_path):
+                accelerator.print(f"\n[Phase 2.75] Loading cached traj-distill corrector from {_traj_save_path}")
+                ckpt = torch.load(_traj_save_path, map_location=device)
+                cache_state.nl_corrector.load_state_dict(ckpt["state_dict"])
+                cache_state.nl_corrector.half().eval()
+            else:
+                accelerator.print(f"\n[Phase 2.75] Trajectory Distillation fine-tuning (K=6, λ=0.1, 200 iters)...")
+                n_traj_calib = 2 if args.test_run else args.lora_calib
+                fine_tune_with_trajectory_distillation(
+                    nl_corrector=cache_state.nl_corrector,
+                    cache_state=cache_state,
+                    fp16_pipe=fp16_pipe_traj,
+                    student_pipe=pipe,
+                    prompts=prompts,
+                    num_calib=n_traj_calib,
+                    t_count=t_count,
+                    guidance_scale=args.guidance_scale,
+                    device=device,
+                    K=6,
+                    lambda_traj=0.1,
+                    n_iter=2 if args.test_run else 200,
+                    lr=5e-5,
+                    calib_seed_offset=args.calib_seed_offset + 1000,
+                    save_path=None if args.test_run else _traj_save_path,
+                )
+
+        elif args.nl_loss_type == "drift_traj" and _drift_tensors is not None:
+            _dtraj_save_path = os.path.join(
+                "/data/jameskimh/james_dit_pixart_sigma_xl_mjhq_cache_adapter",
+                args.quant_method,
+                f"nl_{_nl_base}_drifttraj"
+                f"_r{args.lora_rank}_m{args.nl_mid_dim}"
+                f"_cs{cache_start}_ce{cache_end}_steps{t_count}"
+                f"_cal{args.lora_calib}_seed{args.calib_seed_offset}.pt",
+            )
+            accelerator.print(f"\n[Phase 2.75] Combined drift+traj fine-tuning (K=6, λ=0.1, 200 iters)...")
+            n_dtraj_calib = 2 if args.test_run else args.lora_calib
+            fine_tune_combined(
+                nl_corrector=cache_state.nl_corrector,
+                cache_state=cache_state,
+                fp16_pipe=fp16_pipe_traj,
+                student_pipe=pipe,
+                drift_data=_drift_tensors,
+                prompts=prompts,
+                num_calib=n_dtraj_calib,
+                t_count=t_count,
+                guidance_scale=args.guidance_scale,
+                device=device,
+                K=6,
+                lambda_traj=0.1,
+                lambda_warmup_frac=0.2,
+                n_epochs=2 if args.test_run else 200,
+                lr=3e-4,
+                calib_seed_offset=args.calib_seed_offset + 1000,
+                save_path=None if args.test_run else _dtraj_save_path,
+            )
+
+        del fp16_pipe_traj
+        torch.cuda.empty_cache()
+        gc.collect()
 
     # -----------------------------------------------------------------------
     # CLIP 모델 로드

@@ -590,9 +590,10 @@ def _run_test_sweep(
     args,
 ):
     sweep_results: list[dict] = []
-    test_sweep_dir = os.path.join(save_base_dir, "test_sweep")
+    test_sweep_dir = os.path.join(args.save_dir, "deepcache", "test_sweep")
+    test_sweep_summary_dir = os.path.join(test_sweep_dir, args.dataset_name)
     if accelerator.is_main_process:
-        os.makedirs(test_sweep_dir, exist_ok=True)
+        os.makedirs(test_sweep_summary_dir, exist_ok=True)
 
     for gs, karras, lu, fs_str in TEST_SWEEP_CONFIGS:
         fs_set = {int(x) for x in fs_str.split(",") if x.strip()}
@@ -611,7 +612,7 @@ def _run_test_sweep(
             profile_drift=args.profile_blocks,
         )
 
-        run_save_dir = os.path.join(test_sweep_dir, tag)
+        run_save_dir = os.path.join(test_sweep_dir, tag, args.dataset_name)
         metrics = generate_and_evaluate(
             pipe, cache_state, t_count, prompts, s_count,
             ref_dir, run_save_dir,
@@ -646,11 +647,11 @@ def _run_test_sweep(
             )
 
     if accelerator.is_main_process:
-        summary_path = os.path.join(test_sweep_dir, "test_sweep_summary.json")
+        summary_path = os.path.join(test_sweep_summary_dir, "test_sweep_summary.json")
         with open(summary_path, "w") as f:
             json.dump({"sweep_results": sweep_results}, f, indent=4)
 
-        csv_path = os.path.join(test_sweep_dir, "test_sweep_summary.csv")
+        csv_path = os.path.join(test_sweep_summary_dir, "test_sweep_summary.csv")
         csv_fields = ["guidance_scale", "karras", "lu", "full_steps",
                       "cache_interval", "cache_start", "cache_end", "num_steps",
                       "fid", "is", "psnr", "ssim", "lpips", "clip",
@@ -683,7 +684,7 @@ def main():
     parser.add_argument("--num_samples",         type=int,  default=20)
     parser.add_argument("--test_run",            action="store_true")
     parser.add_argument("--ref_dir",             type=str,  default="./ref_images")
-    parser.add_argument("--save_dir",            type=str,  default="./results")
+    parser.add_argument("--save_dir",            type=str,  default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--model_path",          type=str,
                         default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name",        type=str,  default="MJHQ",
@@ -756,7 +757,7 @@ def main():
     p_count  = 2 if args.test_run else min(64, s_count)
 
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(args.save_dir, args.dataset_name, "deepcache")
+    dataset_save_dir = os.path.join(args.save_dir, "deepcache", args.dataset_name)
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)
@@ -956,7 +957,7 @@ def main():
             use_vc=args.use_vc,
         )
 
-        run_save_dir = os.path.join(dataset_save_dir, config_tag)
+        run_save_dir = os.path.join(args.save_dir, "deepcache", config_tag, args.dataset_name)
         metrics = generate_and_evaluate(
             pipe, cache_state, t_count, prompts, s_count,
             dataset_ref_dir, run_save_dir,
@@ -1041,7 +1042,7 @@ def main():
         config_tag   = f"interval{r['cache_interval']}_s{r['cache_start']}_e{r['cache_end']}_gs{r.get('guidance_scale', 4.5)}"
         if args.cache_aware_calib:
             config_tag += "_calib_cache"
-        run_save_dir = os.path.join(dataset_save_dir, config_tag)
+        run_save_dir = os.path.join(args.save_dir, "deepcache", config_tag, args.dataset_name)
         csv_path = os.path.join(run_save_dir, "metrics.csv")
         csv_fields = ["cache_interval", "cache_start", "cache_end", "num_steps",
                       "speedup_est", "fid", "is", "psnr", "ssim", "lpips", "clip",

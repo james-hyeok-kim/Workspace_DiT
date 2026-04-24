@@ -43,7 +43,7 @@ cd "$SCRIPT_DIR"
 
 for STEP in 15 20; do
     TAG="HQDIT_none_steps${STEP}"
-    RESULT_DIR="$SCRIPT_DIR/results/MJHQ/${TAG}"
+    RESULT_DIR="/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/HQDIT/${TAG}"
     if [ -f "$RESULT_DIR/metrics.json" ] && [ "$TEST_RUN" = false ]; then
         echo "  SKIP: $TAG (already exists)"
         continue
@@ -72,7 +72,7 @@ import csv, json, os
 from pathlib import Path
 from collections import defaultdict
 
-RESULTS_ROOT = Path("results/MJHQ")
+RESULTS_ROOT = Path("/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/HQDIT")
 CSV_PATH     = Path("results/sweep_all_results.csv")
 
 with open(CSV_PATH, newline="") as f:

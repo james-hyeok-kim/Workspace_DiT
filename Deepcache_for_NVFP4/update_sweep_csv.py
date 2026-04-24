@@ -1,13 +1,14 @@
 """
 update_sweep_csv.py
-results/MJHQ 아래 모든 metrics.json을 읽어 sweep_all_results.csv를 재생성.
+/data/jameskimh/james_dit_pixart_xl_mjhq/{METHOD}/{run} 아래 모든 metrics.json을 읽어 sweep_all_results.csv를 재생성.
 기존 4개 method + 신규 3개 method (FP4DIT, HQDIT, SIXBIT) 모두 포함.
 """
+import glob
 import json
 import os
 import csv
 
-RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results", "MJHQ")
+RESULTS_DIR = "/data/jameskimh/james_dit_pixart_xl_mjhq"
 OUT_CSV     = os.path.join(os.path.dirname(__file__), "results", "sweep_all_results.csv")
 
 FIELDS = [
@@ -20,8 +21,10 @@ FIELDS = [
 ]
 
 rows = []
-for tag in sorted(os.listdir(RESULTS_DIR)):
-    metrics_path = os.path.join(RESULTS_DIR, tag, "metrics.json")
+for metrics_path in sorted(glob.glob(os.path.join(RESULTS_DIR, "*", "*", "metrics.json"))):
+    parts = metrics_path.replace("\\", "/").split("/")
+    method, run = parts[-3], parts[-2]
+    tag = f"{method}_{run}"
     if not os.path.isfile(metrics_path):
         continue
     with open(metrics_path) as f:

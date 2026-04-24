@@ -757,6 +757,8 @@ def main():
                         default="PixArt-alpha/PixArt-XL-2-1024-MS")
     parser.add_argument("--dataset_name",   type=str, default="MJHQ",
                         choices=["MJHQ", "sDCI"])
+    parser.add_argument("--img_base_dir",   type=str,
+                        default="/data/jameskimh/james_dit_pixart_xl_mjhq")
     parser.add_argument("--ref_dir",        type=str,
                         default="/data/jameskimh/james_dit_ref/ref_images_fp16",
                         help="FP16 reference image directory")
@@ -795,9 +797,14 @@ def main():
             variant_suffix = "_varA"
 
     dataset_ref_dir  = os.path.join(args.ref_dir,  args.dataset_name)
-    dataset_save_dir = os.path.join(
-        args.save_dir, f"{args.method}{variant_suffix}", args.dataset_name
-    )
+    _img_rel = args.save_dir
+    if "/results/" in _img_rel:
+        _img_rel = _img_rel.split("/results/", 1)[1]
+    elif _img_rel.startswith("./results/"):
+        _img_rel = _img_rel[len("./results/"):]
+    elif _img_rel.startswith("results/"):
+        _img_rel = _img_rel[len("results/"):]
+    dataset_save_dir = os.path.join(args.img_base_dir, _img_rel, f"{args.method}{variant_suffix}")
 
     if accelerator.is_main_process:
         os.makedirs(dataset_ref_dir,  exist_ok=True)

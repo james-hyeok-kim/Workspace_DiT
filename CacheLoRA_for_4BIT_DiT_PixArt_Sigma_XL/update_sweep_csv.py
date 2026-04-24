@@ -1,6 +1,6 @@
 """
 update_sweep_csv.py
-results/MJHQ 아래 모든 metrics.json을 읽어 sweep_all_results.csv를 재생성.
+/data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{METHOD}/{TAG} 아래 모든 metrics.json을 읽어 sweep_all_results.csv를 재생성.
 5개 method: RTN, SVDQUANT, FP4DIT, HQDIT, CONVROT (PixArt-Sigma)
 """
 import json
@@ -21,13 +21,13 @@ FIELDS = [
 ]
 
 rows = []
-# /data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{METHOD}/MJHQ/{TAG}/metrics.json
+# /data/jameskimh/james_dit_pixart_sigma_xl_mjhq/{METHOD}/{TAG}/metrics.json
 for method_dir in sorted(os.listdir(DATA_ROOT)):
-    mjhq_dir = os.path.join(DATA_ROOT, method_dir, "MJHQ")
-    if not os.path.isdir(mjhq_dir):
+    method_path = os.path.join(DATA_ROOT, method_dir)
+    if not os.path.isdir(method_path):
         continue
-    for tag in sorted(os.listdir(mjhq_dir)):
-        metrics_path = os.path.join(mjhq_dir, tag, "metrics.json")
+    for tag in sorted(os.listdir(method_path)):
+        metrics_path = os.path.join(method_path, tag, "metrics.json")
         if not os.path.isfile(metrics_path):
             continue
         with open(metrics_path) as f:

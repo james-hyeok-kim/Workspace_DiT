@@ -34,7 +34,7 @@ CACHE_END=20
 NUM_SAMPLES=20
 
 REF_DIR="$SCRIPT_DIR/ref_images"
-SAVE_DIR="$SCRIPT_DIR/results"
+SAVE_DIR="/data/jameskimh/james_dit_pixart_xl_mjhq"
 LOG_DIR="$SCRIPT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -153,8 +153,7 @@ for label, prefix in logs.items():
 
 if results:
     import csv
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "results", "MJHQ", "deepcache", "qandc_comparison_summary.csv")
+    out_path = "/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/MJHQ/qandc_comparison_summary.csv"
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["method", "FID", "IS", "PSNR", "time"])

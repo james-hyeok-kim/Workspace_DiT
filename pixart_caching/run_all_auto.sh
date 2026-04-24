@@ -104,7 +104,7 @@ fi
 # =============================================================================
 # [2] 수렴 분석: Method A — NVFP4 20-step, no cache
 # =============================================================================
-SAVE_A="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps20"
+SAVE_A="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval1_s8_e20_gs4.5_steps20/MJHQ"
 A_COUNT=$(ls "$SAVE_A"/sample_*.png 2>/dev/null | wc -l || echo 0)
 LOG_A=$(ls "$LOG_DIR"/conv_A_nvfp4_20step_*.log 2>/dev/null | sort | tail -1 || true)
 
@@ -126,7 +126,7 @@ else
         --cache_end 20 \
         --num_samples 1000 \
         --ref_dir "$REF_DIR" \
-        --save_dir "$SCRIPT_DIR/results" \
+        --save_dir "/data/jameskimh/james_dit_pixart_xl_mjhq" \
         --skip_existing \
         2>&1 | tee "$LOG_A"
     TIME_A=$(grep -oP 'time=\K[\d.]+' "$LOG_A" 2>/dev/null | tail -1 || echo 0)
@@ -136,7 +136,7 @@ fi
 # =============================================================================
 # [3] 수렴 분석: Method B — NVFP4 15-step, no cache
 # =============================================================================
-SAVE_B="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps15"
+SAVE_B="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval1_s8_e20_gs4.5_steps15/MJHQ"
 B_COUNT=$(ls "$SAVE_B"/sample_*.png 2>/dev/null | wc -l || echo 0)
 LOG_B=$(ls "$LOG_DIR"/conv_B_nvfp4_15step_*.log 2>/dev/null | sort | tail -1 || true)
 
@@ -158,7 +158,7 @@ else
         --cache_end 20 \
         --num_samples 1000 \
         --ref_dir "$REF_DIR" \
-        --save_dir "$SCRIPT_DIR/results" \
+        --save_dir "/data/jameskimh/james_dit_pixart_xl_mjhq" \
         --skip_existing \
         2>&1 | tee "$LOG_B"
     TIME_B=$(grep -oP 'time=\K[\d.]+' "$LOG_B" 2>/dev/null | tail -1 || echo 0)
@@ -168,7 +168,7 @@ fi
 # =============================================================================
 # [4] 수렴 분석: Method C — Ours (15-step + DeepCache)
 # =============================================================================
-SAVE_C="$SCRIPT_DIR/results/MJHQ/deepcache/interval2_s8_e20_gs4.5_steps15"
+SAVE_C="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval2_s8_e20_gs4.5_steps15/MJHQ"
 C_COUNT=$(ls "$SAVE_C"/sample_*.png 2>/dev/null | wc -l || echo 0)
 LOG_C=$(ls "$LOG_DIR"/conv_C_ours_*.log 2>/dev/null | sort | tail -1 || true)
 
@@ -190,7 +190,7 @@ else
         --cache_end 20 \
         --num_samples 1000 \
         --ref_dir "$REF_DIR" \
-        --save_dir "$SCRIPT_DIR/results" \
+        --save_dir "/data/jameskimh/james_dit_pixart_xl_mjhq" \
         --skip_existing \
         2>&1 | tee "$LOG_C"
     TIME_C=$(grep -oP 'time=\K[\d.]+' "$LOG_C" 2>/dev/null | tail -1 || echo 0)
@@ -206,9 +206,9 @@ STEP5_START=$(date +%s)
 CONV_DIR="$SCRIPT_DIR/results/convergence"
 mkdir -p "$CONV_DIR"
 
-SAVE_A="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps20"
-SAVE_B="$SCRIPT_DIR/results/MJHQ/deepcache/interval1_s8_e20_gs4.5_steps15"
-SAVE_C="$SCRIPT_DIR/results/MJHQ/deepcache/interval2_s8_e20_gs4.5_steps15"
+SAVE_A="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval1_s8_e20_gs4.5_steps20/MJHQ"
+SAVE_B="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval1_s8_e20_gs4.5_steps15/MJHQ"
+SAVE_C="/data/jameskimh/james_dit_pixart_xl_mjhq/deepcache/interval2_s8_e20_gs4.5_steps15/MJHQ"
 NS="20,100,250,500,750,1000"
 REF_EVAL=/data/jameskimh/james_dit_pixart_xl_mjhq/fp16_steps20/MJHQ
 
@@ -248,7 +248,7 @@ notify "✅ [5/5] 수렴 평가 완료! (소요: $(elapsed_since $STEP5_START))"
 python3 << 'PYEOF'
 import csv, os, glob
 
-conv_dir = "/home/jameskimh/workspace/Workspace_DiT/pixart_caching/results/convergence"
+conv_dir = "/home/jovyan/workspace/Workspace_DiT/pixart_caching/results/convergence"
 files = sorted(glob.glob(f"{conv_dir}/*_conv.csv"))
 all_rows = []
 for f in files:
